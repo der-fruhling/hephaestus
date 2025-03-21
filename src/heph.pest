@@ -65,7 +65,7 @@ instruction = {
     OP_TEST_LEQ |
     OP_TEST_EQ |
     OP_TEST_NEQ |
-    OP_DUP
+    (OP_DUP ~ number?)
 }
 
 int_ty = @{ "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" }

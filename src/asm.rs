@@ -212,7 +212,7 @@ enum ParsedInstruction<'a> {
     MemLoad(SpannedStr<'a>, Option<SpannedStr<'a>>),
     MemStore(SpannedStr<'a>, Option<SpannedStr<'a>>),
     Discard,
-    Duplicate,
+    Duplicate(Option<Pair<'a, Rule>>),
     Cmp,
     TestGt,
     TestGeq,
@@ -266,6 +266,13 @@ impl<const N: usize> From<[Instruction; N]> for MappedInstruction {
     #[inline]
     fn from(value: [Instruction; N]) -> Self {
         Self::Many(value.into_iter().collect())
+    }
+}
+
+impl From<Vec<Instruction>> for MappedInstruction {
+    #[inline]
+    fn from(value: Vec<Instruction>) -> Self {
+        Self::Many(value.into_boxed_slice())
     }
 }
 
@@ -417,7 +424,13 @@ impl<'a> ParsedInstruction<'a> {
                 Self::parse_maybe(off)?
             ).into(),
             ParsedInstruction::Discard => Instruction::Discard.into(),
-            ParsedInstruction::Duplicate => Instruction::Duplicate.into(),
+            ParsedInstruction::Duplicate(None) => Instruction::Duplicate.into(),
+            ParsedInstruction::Duplicate(Some(rep)) => {
+                let parsed_int = parse_int(rep.clone());
+                let rep: usize = parsed_int.try_into().map_err(|_| AsmError::new_for(&rep, "too many repetitions!"))?;
+                
+                vec![Instruction::Duplicate; rep].into()
+            }
             ParsedInstruction::Cmp => Instruction::CmpOrd.into(),
             ParsedInstruction::TestGt => Instruction::TestGt.into(),
             ParsedInstruction::TestGeq => Instruction::TestGtEq.into(),
@@ -546,7 +559,7 @@ impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
             Rule::OP_TEST_LEQ => Ok(Self::TestLeq),
             Rule::OP_TEST_EQ => Ok(Self::TestEq),
             Rule::OP_TEST_NEQ => Ok(Self::TestNeq),
-            Rule::OP_DUP => Ok(Self::Duplicate),
+            Rule::OP_DUP => Ok(Self::Duplicate(value.next().map(Into::into))),
             other => unreachable!("illegal instruction rule: {other:?}")
         }
     }
