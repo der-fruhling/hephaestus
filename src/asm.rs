@@ -211,7 +211,7 @@ enum ParsedInstruction<'a> {
     MemFree,
     MemLoad(SpannedStr<'a>, Option<SpannedStr<'a>>),
     MemStore(SpannedStr<'a>, Option<SpannedStr<'a>>),
-    Discard,
+    Discard(Option<Pair<'a, Rule>>),
     Duplicate(Option<Pair<'a, Rule>>),
     Cmp,
     TestGt,
@@ -423,7 +423,13 @@ impl<'a> ParsedInstruction<'a> {
                 Type::try_from(ty)?,
                 Self::parse_maybe(off)?
             ).into(),
-            ParsedInstruction::Discard => Instruction::Discard.into(),
+            ParsedInstruction::Discard(None) => Instruction::Discard.into(),
+            ParsedInstruction::Discard(Some(rep)) => {
+                let parsed_int = parse_int(rep.clone());
+                let rep: usize = parsed_int.try_into().map_err(|_| AsmError::new_for(&rep, "too many repetitions!"))?;
+
+                vec![Instruction::Discard; rep].into()
+            }
             ParsedInstruction::Duplicate(None) => Instruction::Duplicate.into(),
             ParsedInstruction::Duplicate(Some(rep)) => {
                 let parsed_int = parse_int(rep.clone());
@@ -551,7 +557,7 @@ impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
             Rule::OP_MEM_FREE => Ok(Self::MemFree),
             Rule::OP_MEM_LOAD => Ok(Self::MemLoad(value.next().unwrap().into(), value.next().map(Into::into))),
             Rule::OP_MEM_STORE => Ok(Self::MemStore(value.next().unwrap().into(), value.next().map(Into::into))),
-            Rule::OP_DISCARD => Ok(Self::Discard),
+            Rule::OP_DISCARD => Ok(Self::Discard(value.next().map(Into::into))),
             Rule::OP_CMP => Ok(Self::Cmp),
             Rule::OP_TEST_GT => Ok(Self::TestGt),
             Rule::OP_TEST_GEQ => Ok(Self::TestGeq),
