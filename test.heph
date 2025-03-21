@@ -34,29 +34,9 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
 
         dup
         const u64 8
-        cmp
-        const i8 -1
-        test
+        test.geq
 
         if {
-            # copy one byte at a time
-            local.get u_ptr $src
-            const u64 1
-            add
-            dup
-            local.set u_ptr $src
-            mem.ld u8 -1
-            
-            local.get u_ptr $tgt
-            const u64 1
-            add
-            dup
-            local.set u_ptr $tgt
-            mem.st u8 -1
-            
-            const u64 1
-            sub
-        } else {
             # copy 8 bytes at a time
             local.get u_ptr $src
             const u64 8
@@ -64,15 +44,33 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
             dup
             local.set u_ptr $src
             mem.ld u64 -8
-            
+
             local.get u_ptr $tgt
             const u64 8
             add
             dup
             local.set u_ptr $tgt
             mem.st u64 -8
-            
+
             const u64 8
+            sub
+        } else {
+            # copy one byte at a time
+            local.get u_ptr $src
+            const u64 1
+            add
+            dup
+            local.set u_ptr $src
+            mem.ld u8 -1
+
+            local.get u_ptr $tgt
+            const u64 1
+            add
+            dup
+            local.set u_ptr $tgt
+            mem.st u8 -1
+
+            const u64 1
             sub
         }
     }

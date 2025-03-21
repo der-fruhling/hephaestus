@@ -19,8 +19,13 @@ pub enum Instruction {
     BitAnd,
     BitXor,
     Inv,
-    Cmp,
-    Test,
+    CmpOrd,
+    TestGt,
+    TestGtEq,
+    TestLt,
+    TestLtEq,
+    TestEq,
+    TestNeq,
     Cast(Type, Type),
     CastChangeSign,
     Return,
@@ -175,7 +180,12 @@ pub enum Op {
     ContinueArbitrary,
 
     Cmp,
-    Test,
+    TestGt,
+    TestLt,
+    TestGtEq,
+    TestLtEq,
+    TestEq,
+    TestNeq,
 
     Duplicate,
 
@@ -335,8 +345,14 @@ impl BinaryEncodable for Instruction {
             Instruction::Discard => bytes.put_u8(Op::Discard.into_u8()),
             Instruction::Duplicate => bytes.put_u8(Op::Duplicate.into_u8()),
 
-            Instruction::Cmp => bytes.put_u8(Op::Cmp.into_u8()),
-            Instruction::Test => bytes.put_u8(Op::Test.into_u8())
+            Instruction::CmpOrd => bytes.put_u8(Op::Cmp.into_u8()),
+
+            Instruction::TestGt => {}
+            Instruction::TestGtEq => {}
+            Instruction::TestLt => {}
+            Instruction::TestLtEq => {}
+            Instruction::TestEq => {}
+            Instruction::TestNeq => {}
         }
     }
 
@@ -474,8 +490,13 @@ impl BinaryEncodable for Instruction {
             Op::Discard => Self::Discard,
             Op::Duplicate => Self::Duplicate,
 
-            Op::Cmp => Self::Cmp,
-            Op::Test => Self::Test,
+            Op::Cmp => Self::CmpOrd,
+            Op::TestGt => Self::TestGt,
+            Op::TestGtEq => Self::TestGtEq,
+            Op::TestLt => Self::TestLt,
+            Op::TestLtEq => Self::TestLtEq,
+            Op::TestEq => Self::TestEq,
+            Op::TestNeq => Self::TestNeq,
 
             Op::End => return Err(DecodeError::BlockEnd(Op::End)),
             Op::Else => return Err(DecodeError::BlockEnd(Op::Else)),
@@ -602,8 +623,13 @@ impl Display for Instruction {
             Instruction::Store(ty, off) => write!(f, "mem.st {} {:+}", ty, off),
             Instruction::Discard => f.write_str("discard"),
             Instruction::Duplicate => f.write_str("dup"),
-            Instruction::Cmp => f.write_str("cmp"),
-            Instruction::Test => f.write_str("test"),
+            Instruction::CmpOrd => f.write_str("cmp"),
+            Instruction::TestGt => f.write_str("test.gt"),
+            Instruction::TestGtEq => f.write_str("test.geq"),
+            Instruction::TestLt => f.write_str("test.lt"),
+            Instruction::TestLtEq => f.write_str("test.leq"),
+            Instruction::TestEq => f.write_str("test.eq"),
+            Instruction::TestNeq => f.write_str("test.neq"),
         }
     }
 }
@@ -651,8 +677,13 @@ impl Debug for Instruction {
             Instruction::Store(ty, off) => write!(f, "Store({:?} offset: {:+?})", ty, off),
             Instruction::Discard => f.write_str("Discard"),
             Instruction::Duplicate => f.write_str("Duplicate"),
-            Instruction::Cmp => f.write_str("Cmp"),
-            Instruction::Test => f.write_str("Test"),
+            Instruction::CmpOrd => f.write_str("Cmp"),
+            Instruction::TestGt => f.write_str("TestGt"),
+            Instruction::TestGtEq => f.write_str("TestGtEq"),
+            Instruction::TestLt => f.write_str("TestLt"),
+            Instruction::TestLtEq => f.write_str("TestLtEq"),
+            Instruction::TestEq => f.write_str("TestEq"),
+            Instruction::TestNeq => f.write_str("TestNeq"),
         }
     }
 }

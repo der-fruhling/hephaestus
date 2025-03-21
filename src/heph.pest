@@ -58,8 +58,12 @@ instruction = {
     (OP_MEM_STORE ~ ty ~ number?) |
     (OP_DISCARD ~ number?) |
     OP_CMP |
+    OP_TEST_GT |
+    OP_TEST_GEQ |
+    OP_TEST_LT |
+    OP_TEST_LEQ |
     OP_TEST_EQ |
-    OP_TEST |
+    OP_TEST_NEQ |
     OP_DUP
 }
 
@@ -106,8 +110,12 @@ OP_MEM_LOAD = { "mem.ld" }
 OP_MEM_STORE = { "mem.st" }
 OP_DISCARD = { "discard" }
 OP_CMP = { "cmp" }
-OP_TEST = { "test" }
+OP_TEST_GT = { "test.gt" }
+OP_TEST_GEQ = { "test.geq" | "test.gte" }
+OP_TEST_LT = { "test.lt" }
+OP_TEST_LEQ = { "test.leq" | "test.lte" }
 OP_TEST_EQ = { "test.eq" }
+OP_TEST_NEQ = { "test.neq" }
 OP_DUP = { "dup" }
 
 VOID = { "void" }

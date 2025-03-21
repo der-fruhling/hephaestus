@@ -212,8 +212,12 @@ enum ParsedInstruction<'a> {
     Discard,
     Duplicate,
     Cmp,
-    Test,
-    TestEq
+    TestGt,
+    TestGeq,
+    TestLt,
+    TestLeq,
+    TestEq,
+    TestNeq,
 }
 
 enum MappedInstruction {
@@ -401,13 +405,13 @@ impl<'a> ParsedInstruction<'a> {
             ).into(),
             ParsedInstruction::Discard => Instruction::Discard.into(),
             ParsedInstruction::Duplicate => Instruction::Duplicate.into(),
-            ParsedInstruction::Cmp => Instruction::Cmp.into(),
-            ParsedInstruction::Test => Instruction::Test.into(),
-            ParsedInstruction::TestEq => [
-                Instruction::Cmp,
-                Instruction::Const(Const::I8(0)),
-                Instruction::Test
-            ].into()
+            ParsedInstruction::Cmp => Instruction::CmpOrd.into(),
+            ParsedInstruction::TestGt => Instruction::TestGt.into(),
+            ParsedInstruction::TestGeq => Instruction::TestGtEq.into(),
+            ParsedInstruction::TestLt => Instruction::TestLt.into(),
+            ParsedInstruction::TestLeq => Instruction::TestLtEq.into(),
+            ParsedInstruction::TestEq => Instruction::TestEq.into(),
+            ParsedInstruction::TestNeq => Instruction::TestNeq.into()
         })
     }
 
@@ -521,8 +525,12 @@ impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
             Rule::OP_MEM_STORE => Ok(Self::MemStore(value.next().unwrap().into(), value.next().map(Into::into))),
             Rule::OP_DISCARD => Ok(Self::Discard),
             Rule::OP_CMP => Ok(Self::Cmp),
-            Rule::OP_TEST => Ok(Self::Test),
+            Rule::OP_TEST_GT => Ok(Self::TestGt),
+            Rule::OP_TEST_GEQ => Ok(Self::TestGeq),
+            Rule::OP_TEST_LT => Ok(Self::TestLt),
+            Rule::OP_TEST_LEQ => Ok(Self::TestLeq),
             Rule::OP_TEST_EQ => Ok(Self::TestEq),
+            Rule::OP_TEST_NEQ => Ok(Self::TestNeq),
             Rule::OP_DUP => Ok(Self::Duplicate),
             other => unreachable!("illegal instruction rule: {other:?}")
         }
