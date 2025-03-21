@@ -183,8 +183,10 @@ enum ParsedInstruction<'a> {
     ConstFp(SpannedStr<'a>, SpannedStr<'a>),
     GlobalSet(SpannedStr<'a>, SpannedStr<'a>),
     GlobalGet(SpannedStr<'a>, SpannedStr<'a>),
+    GlobalTee(SpannedStr<'a>, SpannedStr<'a>),
     LocalSet(SpannedStr<'a>, SpannedStr<'a>),
     LocalGet(SpannedStr<'a>, SpannedStr<'a>),
+    LocalTee(SpannedStr<'a>, SpannedStr<'a>),
     Add,
     Sub,
     Mul,
@@ -337,6 +339,12 @@ impl<'a> ParsedInstruction<'a> {
 
                 Instruction::GetGlobal(ty, index).into()
             },
+            ParsedInstruction::GlobalTee(ty, global) => {
+                let ty = Type::try_from(ty)?;
+                let index = find_global_by_name(ctx, global)?;
+
+                [Instruction::Duplicate, Instruction::SetGlobal(ty, index)].into()
+            },
             ParsedInstruction::LocalSet(ty, local) => {
                 let ty = Type::try_from(ty)?;
                 let index = find_local_by_name(funct, local)?;
@@ -346,6 +354,11 @@ impl<'a> ParsedInstruction<'a> {
                 let ty = Type::try_from(ty)?;
                 let index = find_local_by_name(funct, local)?;
                 Instruction::GetLocal(ty, index).into()
+            },
+            ParsedInstruction::LocalTee(ty, local) => {
+                let ty = Type::try_from(ty)?;
+                let index = find_local_by_name(funct, local)?;
+                [Instruction::Duplicate, Instruction::SetLocal(ty, index)].into()
             },
             ParsedInstruction::Add => Instruction::Add.into(),
             ParsedInstruction::Sub => Instruction::Sub.into(),
@@ -489,8 +502,10 @@ impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
             },
             Rule::OP_GLOBAL_SET => Ok(Self::GlobalSet(value.next().unwrap().into(), value.next().unwrap().into())),
             Rule::OP_GLOBAL_GET => Ok(Self::GlobalGet(value.next().unwrap().into(), value.next().unwrap().into())),
+            Rule::OP_GLOBAL_TEE => Ok(Self::GlobalTee(value.next().unwrap().into(), value.next().unwrap().into())),
             Rule::OP_LOCAL_SET => Ok(Self::LocalSet(value.next().unwrap().into(), value.next().unwrap().into())),
             Rule::OP_LOCAL_GET => Ok(Self::LocalGet(value.next().unwrap().into(), value.next().unwrap().into())),
+            Rule::OP_LOCAL_TEE => Ok(Self::LocalTee(value.next().unwrap().into(), value.next().unwrap().into())),
             Rule::OP_ADD => Ok(Self::Add),
             Rule::OP_SUB => Ok(Self::Sub),
             Rule::OP_MUL => Ok(Self::Mul),

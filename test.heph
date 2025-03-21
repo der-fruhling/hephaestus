@@ -41,15 +41,13 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
             local.get u_ptr $src
             const u64 8
             add
-            dup
-            local.set u_ptr $src
+            local.tee u_ptr $src
             mem.load u64 -8
 
             local.get u_ptr $tgt
             const u64 8
             add
-            dup
-            local.set u_ptr $tgt
+            local.tee u_ptr $tgt
             mem.store u64 -8
 
             const u64 8
@@ -59,15 +57,13 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
             local.get u_ptr $src
             const u64 1
             add
-            dup
-            local.set u_ptr $src
+            local.tee u_ptr $src
             mem.load u8 -1
 
             local.get u_ptr $tgt
             const u64 1
             add
-            dup
-            local.set u_ptr $tgt
+            local.tee u_ptr $tgt
             mem.store u8 -1
 
             const u64 1

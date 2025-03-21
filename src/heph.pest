@@ -30,8 +30,10 @@ instruction = {
     (OP_CONST ~ fp_ty ~ fp_number) |
     (OP_GLOBAL_SET ~ ty ~ name) |
     (OP_GLOBAL_GET ~ ty ~ name) |
+    (OP_GLOBAL_TEE ~ ty ~ name) |
     (OP_LOCAL_SET ~ ty ~ local_name) |
     (OP_LOCAL_GET ~ ty ~ local_name) |
+    (OP_LOCAL_TEE ~ ty ~ local_name) |
     OP_ADD |
     OP_SUB |
     OP_MUL |
@@ -81,8 +83,10 @@ OP_NOP = { "nop" }
 OP_CONST = { "const" }
 OP_GLOBAL_SET = { "global.set" }
 OP_GLOBAL_GET = { "global.get" }
+OP_GLOBAL_TEE = { "global.tee" }
 OP_LOCAL_SET = { "local.set" }
 OP_LOCAL_GET = { "local.get" }
+OP_LOCAL_TEE = { "local.tee" }
 OP_ADD = { "add" }
 OP_SUB = { "sub" }
 OP_MUL = { "mul" }
