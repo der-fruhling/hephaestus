@@ -57,7 +57,6 @@ instruction = {
     (OP_MEM_LOAD ~ ty ~ number?) |
     (OP_MEM_STORE ~ ty ~ number?) |
     (OP_DISCARD ~ number?) |
-    OP_CMP |
     OP_TEST_GT |
     OP_TEST_GEQ |
     OP_TEST_LT |
@@ -92,11 +91,11 @@ OP_REM = { "rem" }
 OP_BOR = { "bor" }
 OP_BAND = { "band" }
 OP_BXOR = { "bxor" }
-OP_INV = { "inv" }
+OP_INV = { "inv" | "not" }
 OP_CAST = { "cast" }
 OP_RETURN = { "return" }
 OP_CALL = { "call" }
-OP_CALL_DYNAMIC = { "call.dynamic" }
+OP_CALL_DYNAMIC = { "call.dynamic" | "call.dyn" }
 OP_GET_FN_UPTR = { "fnptr" }
 OP_IF = { "if" }
 OP_ELSE = { "else" }
