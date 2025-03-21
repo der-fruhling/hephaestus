@@ -1,0 +1,99 @@
+%hephaestus 0.1.0
+
+funct @malloc($size: u_ptr) -> u_ptr
+    # no locals
+{
+    local.get u_ptr $size
+    mem.alloc
+
+    return
+}
+
+funct @free($ptr: u_ptr) -> u_ptr
+    # no locals
+{
+    local.get u_ptr $ptr
+    mem.free
+
+    return
+}
+
+funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
+    # no locals
+{
+    local.get u64 $len
+    
+    loop {
+        dup
+        const u64 0
+        test.eq
+
+        if {
+            break
+        }
+
+        dup
+        const u64 8
+        cmp
+        const i8 -1
+        test
+
+        if {
+            # copy one byte at a time
+            local.get u_ptr $src
+            const u64 1
+            add
+            dup
+            local.set u_ptr $src
+            mem.ld u8 -1
+            
+            local.get u_ptr $tgt
+            const u64 1
+            add
+            dup
+            local.set u_ptr $tgt
+            mem.st u8 -1
+            
+            const u64 1
+            sub
+        } else {
+            # copy 8 bytes at a time
+            local.get u_ptr $src
+            const u64 8
+            add
+            dup
+            local.set u_ptr $src
+            mem.ld u64 -8
+            
+            local.get u_ptr $tgt
+            const u64 8
+            add
+            dup
+            local.set u_ptr $tgt
+            mem.st u64 -8
+            
+            const u64 8
+            sub
+        }
+    }
+}
+
+funct @main($argc: u32, $argv: u_ptr) -> i32
+    local $test: i32;
+    local $return_value: i32;
+{
+    const i32 1
+    const u64 7
+    cast u64 -> i32
+    sub
+    local.set i32 $test
+
+    const i32 0
+    local.set i32 $return_value
+
+    local.get i32 $test
+    local.get i32 $return_value
+    add
+
+    return
+}

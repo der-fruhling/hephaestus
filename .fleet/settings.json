@@ -1,0 +1,9 @@
+{
+    "editor.guides": [
+        80
+    ],
+
+    "[rust]": {
+        "editor.formatter": "rustfmt"
+    }
+}
