@@ -22,3 +22,11 @@ assembler = ["pest", "pest_derive"]
 name = "heph-asm"
 path = "src/bin/heph-asm.rs"
 required-features = ["assembler"]
+
+[profile.min-size]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+incremental = false
+codegen-units = 100

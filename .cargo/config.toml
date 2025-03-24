@@ -1,2 +1,12 @@
 [target.'cfg(target_arch = "wasm32")']
-runner = "wasmtime"
+runner = "wasmtime --env=RUST_BACKTRACE"
+rustflags = [
+    "-Ctarget-feature=+bulk-memory",
+    "-Ctarget-feature=+mutable-globals",
+    "-Ctarget-feature=+relaxed-simd",
+    "-Ctarget-feature=+sign-ext",
+    "-Ctarget-feature=+tail-call"
+]
+
+[target.'cfg(not(target_arch = "wasm32"))']
+rustflags = ["-Ctarget-cpu=native"]
