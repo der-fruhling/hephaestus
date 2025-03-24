@@ -654,7 +654,7 @@ impl BinaryEncodable for Function {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub locals: Vec<Type>,
     pub ops: Vec<Instruction>

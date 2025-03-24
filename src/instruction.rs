@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt::{Debug, Display, Formatter, Write};
-use crate::{BinaryEncodable, Const, DecodeError, Indent, Type};
+use itertools::Itertools;
+use crate::{BinaryEncodable, Block, Const, DecodeError, Indent, Type};
 
 #[derive(Clone)]
 pub enum Instruction {
@@ -32,9 +33,9 @@ pub enum Instruction {
     Call(u32),
     CallDynamic,
     GetFnUPtr(u32),
-    If(Vec<Instruction>),
-    IfElse(Vec<Instruction>, Vec<Instruction>),
-    Loop(Vec<Instruction>),
+    If(Block),
+    IfElse(Block, Block),
+    Loop(Block),
     Break(u8),
     Continue(u8),
     Alloc,
@@ -505,8 +506,9 @@ impl BinaryEncodable for Instruction {
 }
 
 impl Instruction {
-    fn read_instruction_block(bytes: &mut Bytes) -> Result<Vec<Instruction>, DecodeError> {
+    fn read_instruction_block(bytes: &mut Bytes) -> Result<Block, DecodeError> {
         let mut instructions = vec![];
+        let locals = (0..bytes.get_u16()).map(|_| Type::from_u8(bytes.get_u8())).collect_vec();
 
         loop {
             match Instruction::decode(bytes) {
@@ -516,54 +518,70 @@ impl Instruction {
             }
         }
 
-        Ok(instructions)
+        Ok(Block { locals, ops: instructions })
     }
 
     fn read_instruction_if_block(bytes: &mut Bytes) -> Result<Instruction, DecodeError> {
         let mut instructions = vec![];
+        let locals = (0..bytes.get_u16()).map(|_| Type::from_u8(bytes.get_u8())).collect_vec();
 
         loop {
             match Instruction::decode(bytes) {
                 Ok(instruction) => instructions.push(instruction),
                 Err(DecodeError::BlockEnd(Op::End)) => break,
-                Err(DecodeError::BlockEnd(Op::Else)) => return Ok(Self::IfElse(instructions, Self::read_instruction_block(bytes)?)),
+                Err(DecodeError::BlockEnd(Op::Else)) => return Ok(Self::IfElse(Block { locals, ops: instructions }, Self::read_instruction_block(bytes)?)),
                 Err(e) => return Err(e)
             }
         }
 
-        Ok(Self::If(instructions))
+        Ok(Self::If(Block { locals, ops: instructions }))
     }
 
-    fn encode_if(bytes: &mut BytesMut, block: &Vec<Instruction>) {
+    fn encode_if(bytes: &mut BytesMut, block: &Block) {
         bytes.put_u8(Op::If.into_u8());
 
-        for inst in block {
+        Self::put_locals(bytes, &block);
+
+        for inst in &block.ops {
             inst.encode(bytes);
         }
 
         bytes.put_u8(Op::End.into_u8());
     }
 
-    fn encode_if_else(bytes: &mut BytesMut, if_true: &Vec<Instruction>, if_false: &Vec<Instruction>) {
+    fn put_locals(bytes: &mut BytesMut, block: &&Block) {
+        bytes.put_u16(block.locals.len() as u16);
+        for local in &block.locals {
+            bytes.put_u8(local.into_u8());
+        }
+    }
+
+    fn encode_if_else(bytes: &mut BytesMut, if_true: &Block, if_false: &Block) {
         bytes.put_u8(Op::If.into_u8());
 
-        for inst in if_true {
+        Self::put_locals(bytes, &if_true);
+
+        for inst in &if_true.ops {
             inst.encode(bytes);
         }
 
         bytes.put_u8(Op::Else.into_u8());
 
-        for inst in if_false {
+        Self::put_locals(bytes, &if_false);
+
+        for inst in &if_false.ops {
             inst.encode(bytes);
         }
 
         bytes.put_u8(Op::End.into_u8());
     }
 
-    fn encode_loop(bytes: &mut BytesMut, block: &Vec<Instruction>) {
+    fn encode_loop(bytes: &mut BytesMut, block: &Block) {
         bytes.put_u8(Op::Loop.into_u8());
 
-        for inst in block {
+        Self::put_locals(bytes, &block);
+
+        for inst in &block.ops {
             inst.encode(bytes);
         }
 
@@ -597,19 +615,23 @@ impl Display for Instruction {
             Instruction::GetFnUPtr(g) => write!(f, "fnptr @#{}", g),
             Instruction::If(instructions) => {
                 f.write_str("if {\n")?;
-                instructions.iter().map(|v| Indent(v, 1)).fmt(f)?;
+                instructions.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
+                instructions.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
                 f.write_str("\n}")
             },
             Instruction::IfElse(a, b) => {
                 f.write_str("if {\n")?;
-                a.iter().map(|v| Indent(v, 1)).fmt(f)?;
+                a.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
+                a.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
                 f.write_str("\n} else {\n")?;
-                b.iter().map(|v| Indent(v, 1)).fmt(f)?;
+                b.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
+                b.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
                 f.write_str("\n}")
             },
             Instruction::Loop(instructions) => {
                 f.write_str("loop {\n")?;
-                instructions.iter().map(|v| Indent(v, 1)).fmt(f)?;
+                instructions.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
+                instructions.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
                 f.write_str("\n}")
             },
             Instruction::Break(0) => f.write_str("break"),

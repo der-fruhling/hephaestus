@@ -5,7 +5,7 @@ use ordered_hash_map::OrderedHashMap;
 use pest::{error::LineColLocation, iterators::Pair, Parser};
 use thiserror::Error;
 
-use crate::{Block, Const, Item, LinkageFlags, Module, Type};
+use crate::{Const, Item, LinkageFlags, Module, Type};
 use crate::instruction::Instruction;
 
 #[derive(pest_derive::Parser)]
@@ -87,17 +87,26 @@ impl ParsedHeph {
 
         for (name, global) in self.globals {
             match global {
+                Global::Var(var) => {
+                    let global_item = crate::Global {
+                        linkage: LinkageFlags::EXPORTED | LinkageFlags::ACCESSIBLE | LinkageFlags::DOCUMENTED,
+                        name: Some(name),
+                        ty: var.ty,
+                        mutable: var.mutable,
+                        initializer: var.block.map(collect_block)
+                    };
+
+                    module.globals.push(Item::Global(global_item));
+                }
+
                 Global::Function(funct) => {
                     let funct_item = crate::Function {
                         // TODO linkage
                         linkage: LinkageFlags::EXPORTED | LinkageFlags::ACCESSIBLE | LinkageFlags::DOCUMENTED,
                         name: Some(name),
-                        return_type: funct.return_type,
+                        return_type: funct.block.return_type,
                         params: funct.params,
-                        block: Some(Block {
-                            locals: funct.locals.values().copied().collect(),
-                            ops: funct.instructions
-                        })
+                        block: Some(collect_block(funct.block))
                     };
 
                     module.globals.push(Item::Function(funct_item));
@@ -110,8 +119,16 @@ impl ParsedHeph {
     }
 }
 
+fn collect_block(block: Block) -> crate::Block {
+    crate::Block {
+        locals: block.locals.values().skip(block.inherited_locals).copied().collect(),
+        ops: block.instructions
+    }
+}
+
 #[derive(Debug)]
 pub enum Global {
+    Var(Var),
     Function(Function)
 }
 
@@ -154,9 +171,22 @@ impl TryFrom<SpannedStr<'_>> for Type {
 
 #[derive(Debug)]
 pub struct Function {
+    pub params: OrderedHashMap<String, Type>,
+    pub block: Block,
+}
+
+#[derive(Debug)]
+pub struct Var {
+    pub ty: Type,
+    pub mutable: bool,
+    pub block: Option<Block>,
+}
+
+#[derive(Debug, Default)]
+pub struct Block {
+    pub inherited_locals: usize,
     // locals should be predictable
     pub locals: OrderedHashMap<String, Type>,
-    pub params: OrderedHashMap<String, Type>,
     pub return_type: Option<Type>,
     pub instructions: Vec<Instruction>
 }
@@ -201,9 +231,9 @@ enum ParsedInstruction<'a> {
     Call(SpannedStr<'a>),
     CallDynamic,
     GetFnUPtr(SpannedStr<'a>),
-    IfElse(Vec<ParsedInstruction<'a>>, Vec<ParsedInstruction<'a>>),
-    If(Vec<ParsedInstruction<'a>>),
-    Loop(Vec<ParsedInstruction<'a>>),
+    IfElse(Block, Block),
+    If(Block),
+    Loop(Block),
     Break(Option<SpannedStr<'a>>),
     Continue(Option<SpannedStr<'a>>),
     MemAlloc,
@@ -298,7 +328,7 @@ fn parse_int(text: Pair<Rule>) -> i128 {
 }
 
 impl<'a> ParsedInstruction<'a> {
-    pub fn map_to_instruction(self, ctx: &ParsedHeph, funct: &Function) -> Result<MappedInstruction, AsmError> {
+    pub fn map_to_instruction(self, ctx: &ParsedHeph, block: &Block) -> Result<MappedInstruction, AsmError> {
         Ok(match self {
             ParsedInstruction::Nop => Instruction::Nop.into(),
             ParsedInstruction::ConstInt(ty, int) => {
@@ -354,17 +384,17 @@ impl<'a> ParsedInstruction<'a> {
             },
             ParsedInstruction::LocalSet(ty, local) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_local_by_name(funct, local)?;
+                let index = find_local_by_name(block, local)?;
                 Instruction::SetLocal(ty, index).into()
             },
             ParsedInstruction::LocalGet(ty, local) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_local_by_name(funct, local)?;
+                let index = find_local_by_name(block, local)?;
                 Instruction::GetLocal(ty, index).into()
             },
             ParsedInstruction::LocalTee(ty, local) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_local_by_name(funct, local)?;
+                let index = find_local_by_name(block, local)?;
                 [Instruction::Duplicate, Instruction::SetLocal(ty, index)].into()
             },
             ParsedInstruction::Add => Instruction::Add.into(),
@@ -386,30 +416,9 @@ impl<'a> ParsedInstruction<'a> {
             ParsedInstruction::Call(name) => Instruction::Call(Self::get_global_by_name(ctx, name)?).into(),
             ParsedInstruction::CallDynamic => Instruction::CallDynamic.into(),
             ParsedInstruction::GetFnUPtr(name) => Instruction::GetFnUPtr(Self::get_global_by_name(ctx, name)?).into(),
-            ParsedInstruction::IfElse(if_true, if_false) => {
-                Instruction::IfElse(
-                    if_true.into_iter()
-                        .map(|i| i.map_to_instruction(ctx, funct))
-                        .flatten_ok()
-                        .try_collect()?,
-                    if_false.into_iter()
-                        .map(|i| i.map_to_instruction(ctx, funct))
-                        .flatten_ok()
-                        .try_collect()?
-                ).into()
-            }
-            ParsedInstruction::If(block) => {
-                Instruction::If(block.into_iter()
-                    .map(|i| i.map_to_instruction(ctx, funct))
-                    .flatten_ok()
-                    .try_collect()?).into()
-            }
-            ParsedInstruction::Loop(block) => {
-                Instruction::Loop(block.into_iter()
-                    .map(|i| i.map_to_instruction(ctx, funct))
-                    .flatten_ok()
-                    .try_collect()?).into()
-            }
+            ParsedInstruction::IfElse(if_true, if_false) => Instruction::IfElse(collect_block(if_true), collect_block(if_false)).into(),
+            ParsedInstruction::If(blk) => Instruction::If(collect_block(blk)).into(),
+            ParsedInstruction::Loop(blk) => Instruction::Loop(collect_block(blk)).into(),
             ParsedInstruction::Break(depth) => Instruction::Break(Self::parse_maybe(depth)?).into(),
             ParsedInstruction::Continue(depth) => Instruction::Continue(Self::parse_maybe(depth)?).into(),
             ParsedInstruction::MemAlloc => Instruction::Alloc.into(),
@@ -482,28 +491,17 @@ fn find_global_by_name(ctx: &ParsedHeph, global: SpannedStr<'_>) -> Result<u32, 
 // local can refer to either params or locals
 // in the final instruction, these are combined, but here they
 // are still separated and need to be adjusted
-fn find_local_by_name(funct: &Function, local: SpannedStr<'_>) -> Result<u32, AsmError> {
-    Ok(if funct.params.contains_key(local.text) {
-        funct.params.keys().enumerate()
-            .find(|v| v.1 == local.text)
-            .ok_or_else(|| AsmError {
-                tgt: local.span,
-                message: format!("param {} not found", local.text)
-            })?.0
-    } else {
-        funct.locals.keys().enumerate()
-            .find(|v| v.1 == local.text)
-            .ok_or_else(|| AsmError {
-                tgt: local.span,
-                message: format!("local {} not found", local.text)
-            })?.0 + funct.params.len()
-    } as u32)
+fn find_local_by_name(block: &Block, local: SpannedStr<'_>) -> Result<u32, AsmError> {
+    Ok(block.locals.keys().enumerate()
+        .find(|v| v.1 == local.text)
+        .ok_or_else(|| AsmError {
+            tgt: local.span,
+            message: format!("local {} not found", local.text)
+        })?.0 as u32)
 }
 
-impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
-    type Error = AsmError;
-
-    fn try_from(value: Pair<'a, Rule>) -> Result<Self, Self::Error> {
+impl<'a> ParsedInstruction<'a> {
+    fn parse(parsed: &ParsedHeph, locals: &[(&String, &Type)], value: Pair<'a, Rule>) -> Result<Self, AsmError> {
         debug_assert_eq!(value.as_rule(), Rule::instruction);
         let mut value = value.into_inner();
         let op = value.next().unwrap();
@@ -540,16 +538,16 @@ impl<'a> TryFrom<Pair<'a, Rule>> for ParsedInstruction<'a> {
             Rule::OP_CALL_DYNAMIC => Ok(Self::CallDynamic),
             Rule::OP_GET_FN_UPTR => Ok(Self::GetFnUPtr(value.next().unwrap().into())),
             Rule::OP_IF => {
-                let block = parse_block(value.next().unwrap())?;
+                let block = parse_block(parsed, None, value.next().unwrap(), locals)?;
 
                 if value.next().is_some_and(|r| r.as_rule() == Rule::OP_ELSE) {
-                    let otherwise = parse_block(value.next().unwrap())?;
+                    let otherwise = parse_block(parsed, None, value.next().unwrap(), locals)?;
                     Ok(Self::IfElse(block, otherwise))
                 } else {
                     Ok(Self::If(block))
                 }
             }
-            Rule::OP_LOOP => Ok(Self::Loop(parse_block(value.next().unwrap())?)),
+            Rule::OP_LOOP => Ok(Self::Loop(parse_block(parsed, None, value.next().unwrap(), locals)?)),
             Rule::OP_BREAK => Ok(Self::Break(value.next().map(Into::into))),
             Rule::OP_CONTINUE => Ok(Self::Continue(value.next().map(Into::into))),
             Rule::OP_MEM_ALLOC => Ok(Self::MemAlloc),
@@ -593,10 +591,32 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
 
     for pair in rules {
         match pair.as_rule() {
+            Rule::global => {
+                let mut pairs = pair.into_inner();
+                
+                let mutable = if pairs.peek().is_some_and(|r| r.as_rule() == Rule::MUTABLE) {
+                    pairs.next();
+                    true
+                } else { false };
+                
+                let name = pairs.next().unwrap();
+                let ty = Type::try_from(SpannedStr::from(pairs.next().unwrap()))?;
+                let block = pairs.next();
+                
+                parsed.globals.insert(name.as_str().into(), Global::Var(Var {
+                    ty,
+                    mutable,
+                    block: if let Some(block) = block {
+                        Some(parse_block(&parsed, Some(ty), block, &[])?)
+                    } else {
+                        None
+                    }
+                }));
+            }
             Rule::function => {
                 let mut pairs = pair.into_inner();
                 let name = pairs.next().unwrap();
-                let (params, ty) = {
+                let (params, ty): (OrderedHashMap<String, Type>, Option<Type>) = {
                     let params_or_ty = pairs.next().unwrap();
 
                     let (params, ty) = if params_or_ty.as_rule() == Rule::parameters {
@@ -618,36 +638,24 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                     })
                 };
 
-                let mut pairs = pairs.peekable();
-
-                let locals = pairs
-                    .peeking_take_while(|v| v.as_rule() == Rule::local_var)
-                    .map(parse_local_var)
-                    .try_collect()?;
-
                 parsed.globals.insert(name.as_str().into(), Global::Function(Function {
-                    locals,
-                    params,
-                    return_type: ty,
-                    instructions: Vec::new()
+                    params: params.clone(),
+                    block: Block::default()
                 }));
-
-                let block = pairs.next().unwrap();
-                let instructions: Vec<MappedInstruction> = {
-                    let Global::Function(f) = &parsed.globals[name.as_str()];
-                    parse_block(block)?
-                        .into_iter()
-                        .map(|i| i.map_to_instruction(&parsed, &f))
-                        .try_collect()?
-                };
-
-                let Global::Function(f) = parsed.globals.get_mut(name.as_str()).unwrap();
-                for i in instructions {
-                    match i {
-                        MappedInstruction::Single(s) => f.instructions.push(s),
-                        MappedInstruction::Many(m) => f.instructions.extend(m),
-                    }
-                }
+                
+                let params_vec = params.iter().collect_vec();
+                
+                // this uses a roundabout way because the function body may expect the
+                // function to be a part of the global table inside the block, e.g.
+                // in recursive functions or functions that need to pass a refernce to
+                // themselves to another place.
+                //
+                // the above adds a global with an empty block as a placeholder that
+                // the block can refer to, and the below actually builds the block with
+                // said context intact.
+                let block = parse_block(&parsed, ty, pairs.next().unwrap(), &params_vec[..])?;
+                let Global::Function(f) = parsed.globals.get_mut(&String::from(name.as_str())).unwrap() else { unreachable!() };
+                f.block = block;
             },
             Rule::EOI => break,
             other => unreachable!("illegal declaration rule: {other:?}")
@@ -657,14 +665,40 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
     Ok(parsed)
 }
 
-fn parse_block(block: Pair<Rule>) -> Result<Vec<ParsedInstruction>, AsmError> {
+fn parse_block(parsed: &ParsedHeph, return_type: Option<Type>, block: Pair<Rule>, parent_locals: &[(&String, &Type)]) -> Result<Block, AsmError> {
     debug_assert_eq!(block.as_rule(), Rule::block);
+    
+    let mut pairs = block.into_inner().peekable();
 
-    let instructions: Vec<ParsedInstruction> =
-        block.into_inner()
-            .map(ParsedInstruction::try_from)
-            .try_collect()?;
-    Ok(instructions)
+    let locals: OrderedHashMap<String, Type> = [
+        parent_locals.iter().map(|(a, b)| ((*a).clone(), **b)).collect_vec(),
+        pairs
+            .peeking_take_while(|v| v.as_rule() == Rule::local_var)
+            .map(parse_local_var)
+            .try_collect::<_, Vec<_>, _>()?
+    ].into_iter().flatten().collect();
+
+    let mut block = Block {
+        inherited_locals: parent_locals.len(),
+        locals,
+        return_type,
+        instructions: Vec::new()
+    };
+
+    let local_vec = block.locals.iter().collect_vec();
+    let instructions: Vec<MappedInstruction> = pairs
+        .map(|r| ParsedInstruction::parse(parsed, &local_vec[..], r))
+        .map(|i| i.and_then(|i| i.map_to_instruction(&parsed, &block)))
+        .try_collect()?;
+    
+    for i in instructions {
+        match i {
+            MappedInstruction::Single(s) => block.instructions.push(s),
+            MappedInstruction::Many(m) => block.instructions.extend(m),
+        }
+    }
+    
+    Ok(block)
 }
 
 fn parse_local_var(v: Pair<'_, Rule>) -> Result<(String, Type), AsmError> {

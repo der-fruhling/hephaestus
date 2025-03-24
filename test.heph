@@ -1,16 +1,23 @@
 %hephaestus 0.1.0
 
+globl @test_imm: u32 {
+    const u32 42
+    return
+}
+
+globl @test_mut: u_ptr
+
 funct @malloc($size: u_ptr) -> u_ptr
-    # no locals
 {
     local.get u_ptr $size
     mem.alloc
+
+    global.tee u_ptr @test_mut
 
     return
 }
 
 funct @free($ptr: u_ptr) -> u_ptr
-    # no locals
 {
     local.get u_ptr $ptr
     mem.free
@@ -19,7 +26,6 @@ funct @free($ptr: u_ptr) -> u_ptr
 }
 
 funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
-    # no locals
 {
     local.get u64 $len
     
@@ -73,9 +79,10 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
 }
 
 funct @main($argc: u32, $argv: u_ptr) -> i32
+{
     local $test: i32;
     local $return_value: i32;
-{
+
     const i32 1
     const u64 7
     cast u64 -> i32

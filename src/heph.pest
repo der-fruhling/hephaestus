@@ -4,6 +4,7 @@ header = { "%hephaestus" ~ version }
 version = @{ number ~ "." ~ number ~ "." ~ number }
 
 declaration = _{
+    global |
     function
 }
 
@@ -11,17 +12,19 @@ name = @{ "@" ~ text }
 local_name = @{ "$" ~ text }
 text = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]")+ }
 
-function = {
-    "funct" ~ name ~ "(" ~ parameters? ~ ")" ~ "->" ~ (ty | VOID) ~ NEWLINE+
-        ~ ("local" ~ local_var ~ ";" ~ NEWLINE+)*
-        ~ block
+global = {
+    "globl" ~ MUTABLE? ~ name ~ ":" ~ ty ~ block?
 }
 
-parameters = { local_var ~ ("," ~ local_var)* }
+function = {
+    "funct" ~ name ~ "(" ~ parameters? ~ ")" ~ "->" ~ (ty | VOID) ~ NEWLINE* ~ block
+}
+
+parameters = { local_var ~ ("," ~ NEWLINE* ~ local_var)* }
 local_var = { local_name ~ ":" ~ ty }
 
 block = {
-    "{" ~ NEWLINE+ ~ (instruction ~ NEWLINE+)* ~ "}"
+    "{" ~ NEWLINE+ ~ ("local" ~ local_var ~ ";" ~ NEWLINE+)* ~ (instruction ~ NEWLINE+)* ~ "}"
 }
 
 instruction = {
@@ -122,6 +125,7 @@ OP_TEST_NEQ = { "test.neq" }
 OP_DUP = { "dup" }
 
 VOID = { "void" }
+MUTABLE = { "mutable" }
 
 WHITESPACE = _{ " " }
 COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
