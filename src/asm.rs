@@ -759,9 +759,10 @@ mod tests {
         %hephaestus 0.1.0
 
         funct @main($argc: u32, $argv: u_ptr) -> i32
+        {
             local $test: i32;
             local $return_value: i32;
-        {
+            
             const i32 1
             const u64 7
             cast u64 -> i32
@@ -784,12 +785,12 @@ mod tests {
         assert!(parsed.globals.len() == 1, "global length does not match expected");
         assert!(matches!(&parsed.globals["@main"], Global::Function(_)), "global not a function");
 
-        let Global::Function(f) = &parsed.globals["@main"];
+        let Global::Function(f) = &parsed.globals["@main"] else { unreachable!("main is not function?") };
 
-        assert_eq!(f.locals.len(), 2);
-        assert_eq!(f.locals["$test"], Type::I32);
-        assert_eq!(f.locals["$return_value"], Type::I32);
-        let locals: [&str; 2] = f.locals.keys().map(|v| v.as_str()).collect_array().unwrap();
+        assert_eq!(f.block.locals.len() - f.block.inherited_locals, 2);
+        assert_eq!(f.block.locals["$test"], Type::I32);
+        assert_eq!(f.block.locals["$return_value"], Type::I32);
+        let locals: [&str; 2] = f.block.locals.keys().skip(f.block.inherited_locals).map(|v| v.as_str()).collect_array().unwrap();
         assert!(matches!(locals, ["$test", "$return_value"]), "order of locals was not preserved");
 
         assert_eq!(f.params.len(), 2);
