@@ -13,7 +13,7 @@ local_name = @{ "$" ~ text }
 text = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]")+ }
 
 global = {
-    "globl" ~ MUTABLE? ~ name ~ ":" ~ ty ~ block?
+    "globl" ~ MUTABLE? ~ name ~ ":" ~ ty ~ ("=" ~ block)?
 }
 
 function = {

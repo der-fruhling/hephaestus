@@ -1,6 +1,6 @@
 %hephaestus 0.1.0
 
-globl @test_imm: u32 {
+globl @test_imm: u32 = {
     const u32 42
     return
 }
