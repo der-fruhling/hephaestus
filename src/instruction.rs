@@ -594,10 +594,10 @@ impl Display for Instruction {
         match self {
             Instruction::Nop => f.write_str("nop"),
             Instruction::Const(c) => write!(f, "const {} {}", c.ty(), c),
-            Instruction::SetGlobal(ty, g) => write!(f, "global.set {} {}", ty, g),
-            Instruction::GetGlobal(ty, g) => write!(f, "global.get {} {}", ty, g),
-            Instruction::SetLocal(ty, l) => write!(f, "local.set {} {}", ty, l),
-            Instruction::GetLocal(ty, l) => write!(f, "local.get {} {}", ty, l),
+            Instruction::SetGlobal(ty, g) => write!(f, "global.set {} @%{}", ty, g),
+            Instruction::GetGlobal(ty, g) => write!(f, "global.get {} @%{}", ty, g),
+            Instruction::SetLocal(ty, l) => write!(f, "local.set {} $%{}", ty, l),
+            Instruction::GetLocal(ty, l) => write!(f, "local.get {} $%{}", ty, l),
             Instruction::Add => f.write_str("add"),
             Instruction::Sub => f.write_str("sub"),
             Instruction::Mul => f.write_str("mul"),
@@ -607,33 +607,15 @@ impl Display for Instruction {
             Instruction::BitAnd => f.write_str("band"),
             Instruction::BitXor => f.write_str("bxor"),
             Instruction::Inv => f.write_str("inv"),
-            Instruction::Cast(a, b) => write!(f, "cast {}! -> {}", a, b),
-            Instruction::CastChangeSign => f.write_str("cast signed <-> unsigned"),
+            Instruction::Cast(a, b) => write!(f, "cast {} -> {}", a, b),
+            Instruction::CastChangeSign => f.write_str("cast.chgsign # erased type cast"),
             Instruction::Return => f.write_str("return"),
-            Instruction::Call(g) => write!(f, "call @#{}", g),
+            Instruction::Call(g) => write!(f, "call @%{}", g),
             Instruction::CallDynamic => f.write_str("call.dynamic"),
-            Instruction::GetFnUPtr(g) => write!(f, "fnptr @#{}", g),
-            Instruction::If(instructions) => {
-                f.write_str("if {\n")?;
-                instructions.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
-                instructions.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
-                f.write_str("\n}")
-            },
-            Instruction::IfElse(a, b) => {
-                f.write_str("if {\n")?;
-                a.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
-                a.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
-                f.write_str("\n} else {\n")?;
-                b.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
-                b.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
-                f.write_str("\n}")
-            },
-            Instruction::Loop(instructions) => {
-                f.write_str("loop {\n")?;
-                instructions.locals.iter().map(|l| Indent(l, 1)).fmt(f)?;
-                instructions.ops.iter().map(|v| Indent(v, 1)).fmt(f)?;
-                f.write_str("\n}")
-            },
+            Instruction::GetFnUPtr(g) => write!(f, "fnptr @%{}", g),
+            Instruction::If(instructions) => write!(f, "if {instructions}"),
+            Instruction::IfElse(a, b) => write!(f, "if {a} else {b}"),
+            Instruction::Loop(instructions) => write!(f, "loop {instructions}"),
             Instruction::Break(0) => f.write_str("break"),
             Instruction::Break(depth) => write!(f, "break %{}", depth),
             Instruction::Continue(0) => f.write_str("continue"),

@@ -4,27 +4,87 @@ header = { "%hephaestus" ~ version }
 version = @{ number ~ "." ~ number ~ "." ~ number }
 
 declaration = _{
+    global_attribute |
     global |
-    function
+    function |
+    import_module |
+    struct_definition |
+    enum_definition
 }
 
-name = @{ "@" ~ text }
-local_name = @{ "$" ~ text }
-text = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]")+ }
+name = ${ "@" ~ (special_number | text) }
+local_name = ${ "$" ~ (special_number | text) }
+text = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
 
 global = {
-    "globl" ~ MUTABLE? ~ name ~ ":" ~ ty ~ ("=" ~ block)?
+    (attribute ~ NEWLINE+)* ~ linkage ~ KW_GLOBL ~ MUTABLE? ~ name ~ ":" ~ complex_type ~ ("=" ~ block)?
 }
 
 function = {
-    "funct" ~ name ~ "(" ~ parameters? ~ ")" ~ "->" ~ (ty | VOID) ~ NEWLINE* ~ block
+    (attribute ~ NEWLINE+)* ~ linkage ~ KW_FUNCT ~ name ~ "(" ~ parameters? ~ ")" ~ "->" ~ (complex_type | VOID) ~ (NEWLINE* ~ block)?
 }
 
+linkage = { ((KW_EXPORT ~ export_mods?) | (KW_INTERNAL ~ (KW_INLINE_ALWAYS | KW_INLINE)?))? ~ (KW_FROM ~ name ~ "/" ~ symbol_name ~ KW_IMPORT)? }
+
+type_linkage = { ((KW_EXPORT ~ export_mods?) | KW_INTERNAL)? ~ (KW_FROM ~ name ~ "/" ~ symbol_name ~ KW_IMPORT)? }
+
+export_mods = { (KW_ACCESSIBLE | KW_NO_ACCESSIBLE | KW_DOCUMENT | KW_NO_DOCUMENT)+ }
+
+import_module = {
+    KW_IMPORT ~ (import_static | import_dynamic | import_component)
+}
+
+import_static = {
+    KW_STATIC ~ module_name ~ KW_AS ~ name
+}
+
+import_dynamic = {
+    KW_DYNAMIC ~ module_name ~ KW_AS ~ name
+}
+
+import_component = {
+    KW_WORLD ~ module_name ~ KW_FROM ~ KW_COMPONENT ~ module_name ~ KW_AS ~ name
+}
+
+struct_definition = {
+    (attribute ~ NEWLINE+)* ~ type_linkage ~ KW_STRUCT ~ name ~ "{" ~ NEWLINE+ ~ (local_var ~ ("," ~ NEWLINE+ ~ local_var)* ~ NEWLINE+)? ~ "}"
+}
+
+enum_definition = {
+    (attribute ~ NEWLINE+)* ~ type_linkage ~ KW_ENUM ~ name ~ ":" ~ ty ~ "{" ~ NEWLINE+ ~ (enum_variant ~ ("," ~ NEWLINE+ ~ enum_variant)* ~ NEWLINE+)? ~ "}"
+}
+
+enum_variant = {
+    local_name ~ "=" ~ number
+}
+
+module_name = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+symbol_name = @{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
+
+global_attribute = {
+    "[" ~ "!" ~ attribute_path ~ ("(" ~ attribute_content ~ ")")? ~ "]"
+}
+
+attribute_content = { (!")" ~ ANY)* }
+
+attribute = _{
+    "[" ~ attribute_path ~ ("(" ~ attribute_content ~ ")")? ~ "]"
+}
+
+attribute_path = @{ text ~ ("::" ~ text)* }
+
 parameters = { local_var ~ ("," ~ NEWLINE* ~ local_var)* }
-local_var = { local_name ~ ":" ~ ty }
+local_var = { local_name ~ ":" ~ complex_type }
 
 block = {
-    "{" ~ NEWLINE+ ~ ("local" ~ local_var ~ ";" ~ NEWLINE+)* ~ (instruction ~ NEWLINE+)* ~ "}"
+    "{" ~ NEWLINE+ ~ (block_locals | block_named_locals)? ~ (instruction ~ NEWLINE+)* ~ "}"
+}
+
+block_named_locals = _{ ("local" ~ local_var ~ ";" ~ NEWLINE+)* }
+block_locals = _{ "locals" ~ "[" ~ local_list? ~ "]" ~ NEWLINE+ }
+
+local_list = {
+    ty ~ ("," ~ ty)*
 }
 
 instruction = {
@@ -54,8 +114,8 @@ instruction = {
     (OP_IF ~ block ~ OP_ELSE ~ block) |
     (OP_IF ~ block) |
     (OP_LOOP ~ block) |
-    (OP_BREAK ~ depth?) |
-    (OP_CONTINUE ~ depth?) |
+    (OP_BREAK ~ special_number?) |
+    (OP_CONTINUE ~ special_number?) |
     OP_MEM_ALLOC |
     OP_MEM_REALLOC |
     OP_MEM_FREE |
@@ -75,7 +135,11 @@ int_ty = @{ "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" }
 fp_ty = @{ "f32" | "f64" }
 ty = @{ int_ty | fp_ty | "u_ptr" | "i_ptr" }
 
-depth = @{ "%" ~ number }
+complex_type = _{ ty | ref_type | enum_type }
+ref_type = { KW_REF ~ name }
+enum_type = { KW_ENUM ~ name }
+
+special_number = @{ "%" ~ number }
 
 number = ${ ("-" | "+")? ~ (ASCII_DIGIT+ | hex ~ ASCII_HEX_DIGIT+) }
 fp_number = ${ (ASCII_DIGIT+ | ASCII_DIGIT* ~ "." ~ ASCII_DIGIT+) }
@@ -124,8 +188,29 @@ OP_TEST_EQ = { "test.eq" }
 OP_TEST_NEQ = { "test.neq" }
 OP_DUP = { "dup" }
 
+KW_EXPORT = { "export" }
+KW_INTERNAL = { "internal" }
+KW_ACCESSIBLE = { "accessible" }
+KW_NO_ACCESSIBLE = { "noaccessible" }
+KW_DOCUMENT = { "document" }
+KW_NO_DOCUMENT = { "nodocument" }
+KW_IMPORT = _{ "import" }
+KW_FROM = _{ "from" }
+KW_FUNCT = _{ "funct" }
+KW_GLOBL = _{ "globl" }
+KW_STATIC = _{ "static" }
+KW_DYNAMIC = _{ "dynamic" }
+KW_COMPONENT = _{ "component" }
+KW_WORLD = _{ "world" }
+KW_AS = _{ "as" }
+KW_INLINE = { "inline" }
+KW_INLINE_ALWAYS = { "inline" ~ "(" ~ "always" ~ ")" }
+KW_STRUCT = _{ "struct" }
+KW_ENUM = _{ "enum" }
+KW_REF = _{ "ref" }
+
 VOID = { "void" }
 MUTABLE = { "mutable" }
 
 WHITESPACE = _{ " " }
-COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
+COMMENT = _{ (("#" ~ (!NEWLINE ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/"))+ }

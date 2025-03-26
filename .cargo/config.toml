@@ -1,5 +1,5 @@
 [target.'cfg(target_arch = "wasm32")']
-runner = "wasmtime --env=RUST_BACKTRACE"
+runner = "wasmtime --dir . -Sinherit-env"
 rustflags = [
     "-Ctarget-feature=+bulk-memory",
     "-Ctarget-feature=+mutable-globals",

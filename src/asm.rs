@@ -1,16 +1,23 @@
 use std::{borrow::Cow, fmt::Display, str::FromStr};
+use std::fmt::Formatter;
+use std::fs::File;
 use std::vec::IntoIter;
+use bytes::Bytes;
 use itertools::Itertools;
 use ordered_hash_map::OrderedHashMap;
 use pest::{error::LineColLocation, iterators::Pair, Parser};
 use thiserror::Error;
 
-use crate::{Const, Item, LinkageFlags, Module, Type};
+use crate::{ComplexType, Const, ImportedModule, Item, LinkageFlags, Module, Source, StructField, StructFieldLayout, StructLayout, Type};
 use crate::instruction::Instruction;
 
-#[derive(pest_derive::Parser)]
-#[grammar = "heph.pest"]
-struct Grammar;
+mod grammar {
+    #[derive(pest_derive::Parser)]
+    #[grammar = "heph.pest"]
+    pub struct Grammar;
+}
+
+use grammar::{Rule, Grammar};
 
 #[derive(Clone, Copy, Debug)]
 pub struct LineCol { pub line: usize, pub col: usize }
@@ -21,7 +28,7 @@ impl Display for LineCol {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Span(pub LineCol, pub Option<LineCol>);
 
 impl From<LineColLocation> for Span {
@@ -48,17 +55,17 @@ impl Display for Span {
 }
 
 #[derive(Error, Debug)]
-#[error("{tgt} : {message}")]
+#[error("{tgt:?} : {message}")]
 pub struct AsmError {
     pub message: String,
-    pub tgt: Span
+    pub tgt: Option<Span>
 }
 
 impl From<pest::error::Error<Rule>> for AsmError {
     fn from(value: pest::error::Error<Rule>) -> Self {
         Self {
             message: value.variant.to_string(),
-            tgt: value.line_col.into()
+            tgt: Some(value.line_col.into())
         }
     }
 }
@@ -68,7 +75,7 @@ impl AsmError {
         let (line, col) = tgt.line_col();
 
         Self {
-            tgt: Span(LineCol { line, col }, None),
+            tgt: Some(Span(LineCol { line, col }, None)),
             message: msg.into()
         }
     }
@@ -88,8 +95,9 @@ impl ParsedHeph {
         for (name, global) in self.globals {
             match global {
                 Global::Var(var) => {
+                    let (linkage, source) = var.linkage.split();
                     let global_item = crate::Global {
-                        linkage: LinkageFlags::EXPORTED | LinkageFlags::ACCESSIBLE | LinkageFlags::DOCUMENTED,
+                        linkage, source,
                         name: Some(name),
                         ty: var.ty,
                         mutable: var.mutable,
@@ -98,18 +106,40 @@ impl ParsedHeph {
 
                     module.globals.push(Item::Global(global_item));
                 }
-
                 Global::Function(funct) => {
+                    let (linkage, source) = funct.linkage.split();
                     let funct_item = crate::Function {
-                        // TODO linkage
-                        linkage: LinkageFlags::EXPORTED | LinkageFlags::ACCESSIBLE | LinkageFlags::DOCUMENTED,
+                        linkage, source,
                         name: Some(name),
-                        return_type: funct.block.return_type,
+                        return_type: funct.return_type,
                         params: funct.params,
-                        block: Some(collect_block(funct.block))
+                        block: funct.block.map(collect_block)
                     };
 
                     module.globals.push(Item::Function(funct_item));
+                }
+                Global::ImportedModule(m) => {
+                    module.globals.push(Item::ImportedModule(m));
+                }
+                Global::Struct(s) => {
+                    let (linkage, source) = s.linkage.split();
+                    module.globals.push(Item::Struct(crate::Struct {
+                        layout: s.layout,
+                        linkage,
+                        source,
+                        name: Some(name),
+                        values: s.values
+                    }))
+                }
+                Global::Enum(e) => {
+                    let (linkage, source) = e.linkage.split();
+                    module.globals.push(Item::Enum(crate::Enum {
+                        backing_type: e.backing_type,
+                        linkage,
+                        source,
+                        name: Some(name),
+                        values: e.values
+                    }))
                 }
             }
         }
@@ -121,7 +151,7 @@ impl ParsedHeph {
 
 fn collect_block(block: Block) -> crate::Block {
     crate::Block {
-        locals: block.locals.values().skip(block.inherited_locals).copied().collect(),
+        locals: block.locals.values().skip(block.inherited_locals).map(|c| c.ty()).collect(),
         ops: block.instructions
     }
 }
@@ -129,7 +159,10 @@ fn collect_block(block: Block) -> crate::Block {
 #[derive(Debug)]
 pub enum Global {
     Var(Var),
-    Function(Function)
+    Function(Function),
+    ImportedModule(ImportedModule),
+    Struct(Struct),
+    Enum(Enum)
 }
 
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -169,31 +202,101 @@ impl TryFrom<SpannedStr<'_>> for Type {
     }
 }
 
+impl ComplexType {
+    pub fn parse(parsed: &ParsedHeph, value: Pair<'_, Rule>) -> Result<Self, AsmError> {
+        match value.as_rule() {
+            Rule::ty => Type::try_from(SpannedStr::from(value)).map(ComplexType::Primitive),
+            Rule::ref_type => {
+                let (name, _) = find_global_by_name(parsed, Name::from(value.into_inner().next().unwrap()))?;
+                Ok(ComplexType::StructRef(name))
+            }
+            Rule::enum_type => {
+                let (name, g) = find_global_by_name(parsed, Name::from(value.clone().into_inner().next().unwrap()))?;
+
+                let ty = if let Global::Enum(e) = g {
+                    e.backing_type
+                } else {
+                    return Err(AsmError::new_for(&value, "not an enum"));
+                };
+
+                Ok(ComplexType::Enum(ty, name))
+            }
+            other => unreachable!("invalid complex type rule: {:?}", other)
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Linkage {
+    Export(LinkageFlags),
+    Import(Box<Linkage>, u32, String),
+    Internal(InlinePref)
+}
+
+impl Linkage {
+    pub fn split(self) -> (LinkageFlags, Option<Source>) {
+        match self {
+            Linkage::Export(flags) => (flags, None),
+            Linkage::Import(linkage, module, item) => (linkage.split().0, Some(Source { module, item })),
+            Linkage::Internal(pref) => match pref {
+                InlinePref::Force => (LinkageFlags::INTERNAL | LinkageFlags::INLINE | LinkageFlags::FORCE_INLINE, None),
+                InlinePref::Prefer => (LinkageFlags::INTERNAL | LinkageFlags::INLINE, None),
+                InlinePref::Never => (LinkageFlags::INTERNAL, None),
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum InlinePref {
+    Force,
+    Prefer,
+    Never
+}
+
 #[derive(Debug)]
 pub struct Function {
-    pub params: OrderedHashMap<String, Type>,
-    pub block: Block,
+    pub linkage: Linkage,
+    pub params: OrderedHashMap<String, ComplexType>,
+    pub return_type: Option<ComplexType>,
+    pub block: Option<Block>,
 }
 
 #[derive(Debug)]
 pub struct Var {
-    pub ty: Type,
+    pub ty: ComplexType,
+    pub linkage: Linkage,
     pub mutable: bool,
     pub block: Option<Block>,
+}
+
+#[derive(Debug)]
+pub struct Struct {
+    pub layout: StructLayout,
+    pub linkage: Linkage,
+    pub values: Vec<StructField>
+}
+
+#[derive(Debug)]
+pub struct Enum {
+    pub backing_type: Type,
+    pub linkage: Linkage,
+    pub values: OrderedHashMap<String, Const>
 }
 
 #[derive(Debug, Default)]
 pub struct Block {
     pub inherited_locals: usize,
     // locals should be predictable
-    pub locals: OrderedHashMap<String, Type>,
-    pub return_type: Option<Type>,
+    pub locals: OrderedHashMap<String, ComplexType>,
+    pub return_type: Option<ComplexType>,
     pub instructions: Vec<Instruction>
 }
 
+#[derive(Copy, Clone)]
 struct SpannedStr<'a> {
     pub text: &'a str,
-    pub span: Span
+    pub span: Option<Span>
 }
 
 impl<'a> From<Pair<'a, Rule>> for SpannedStr<'a> {
@@ -202,7 +305,7 @@ impl<'a> From<Pair<'a, Rule>> for SpannedStr<'a> {
 
         Self {
             text: value.as_str(),
-            span: Span(LineCol { line, col }, None)
+            span: Some(Span(LineCol { line, col }, None))
         }
     }
 }
@@ -211,12 +314,12 @@ enum ParsedInstruction<'a> {
     Nop,
     ConstInt(SpannedStr<'a>, Pair<'a, Rule>),
     ConstFp(SpannedStr<'a>, SpannedStr<'a>),
-    GlobalSet(SpannedStr<'a>, SpannedStr<'a>),
-    GlobalGet(SpannedStr<'a>, SpannedStr<'a>),
-    GlobalTee(SpannedStr<'a>, SpannedStr<'a>),
-    LocalSet(SpannedStr<'a>, SpannedStr<'a>),
-    LocalGet(SpannedStr<'a>, SpannedStr<'a>),
-    LocalTee(SpannedStr<'a>, SpannedStr<'a>),
+    GlobalSet(SpannedStr<'a>, Name<'a>),
+    GlobalGet(SpannedStr<'a>, Name<'a>),
+    GlobalTee(SpannedStr<'a>, Name<'a>),
+    LocalSet(SpannedStr<'a>, Name<'a>),
+    LocalGet(SpannedStr<'a>, Name<'a>),
+    LocalTee(SpannedStr<'a>, Name<'a>),
     Add,
     Sub,
     Mul,
@@ -228,9 +331,9 @@ enum ParsedInstruction<'a> {
     Inv,
     Cast(SpannedStr<'a>, SpannedStr<'a>),
     Return,
-    Call(SpannedStr<'a>),
+    Call(Name<'a>),
     CallDynamic,
-    GetFnUPtr(SpannedStr<'a>),
+    GetFnUPtr(Name<'a>),
     IfElse(Block, Block),
     If(Block),
     Loop(Block),
@@ -366,21 +469,21 @@ impl<'a> ParsedInstruction<'a> {
             },
             ParsedInstruction::GlobalSet(ty, global) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_global_by_name(ctx, global)?;
+                let (name, _) = find_global_by_name(ctx, global)?;
 
-                Instruction::SetGlobal(ty, index).into()
+                Instruction::SetGlobal(ty, name).into()
             },
             ParsedInstruction::GlobalGet(ty, global) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_global_by_name(ctx, global)?;
+                let (name, _) = find_global_by_name(ctx, global)?;
 
-                Instruction::GetGlobal(ty, index).into()
+                Instruction::GetGlobal(ty, name).into()
             },
             ParsedInstruction::GlobalTee(ty, global) => {
                 let ty = Type::try_from(ty)?;
-                let index = find_global_by_name(ctx, global)?;
+                let (name, _) = find_global_by_name(ctx, global)?;
 
-                [Instruction::Duplicate, Instruction::SetGlobal(ty, index)].into()
+                [Instruction::Duplicate, Instruction::SetGlobal(ty, name)].into()
             },
             ParsedInstruction::LocalSet(ty, local) => {
                 let ty = Type::try_from(ty)?;
@@ -468,40 +571,100 @@ impl<'a> ParsedInstruction<'a> {
         }).unwrap_or_else(|| Ok(T::default()))
     }
 
-    fn get_global_by_name(ctx: &ParsedHeph, name: SpannedStr) -> Result<u32, AsmError> {
+    fn get_global_by_name(ctx: &ParsedHeph, name: Name) -> Result<u32, AsmError> {
         Ok(ctx.globals.keys().enumerate()
-            .find(|s| s.1 == name.text)
+            .find(|s| match name {
+                Name::Named(n) => s.1 == n.text,
+                Name::Numeric(_, idx, _) => s.0 == idx,
+            })
             .map(|v| v.0)
             .ok_or_else(|| AsmError {
-                tgt: name.span,
-                message: format!("unknown global {}; did you forget to define it above this usage?", name.text)
+                tgt: match name {
+                    Name::Named(n) => n.span,
+                    Name::Numeric(_, _, span) => Some(span),
+                },
+                message: format!("unknown global {}; did you forget to define it above this usage?", name)
             })? as u32)
     }
 }
 
-fn find_global_by_name(ctx: &ParsedHeph, global: SpannedStr<'_>) -> Result<u32, AsmError> {
-    Ok(ctx.globals.keys().enumerate()
-        .find(|v| v.1 == global.text)
+#[derive(Copy, Clone)]
+enum Name<'a> {
+    Named(SpannedStr<'a>),
+    Numeric(char, usize, Span)
+}
+
+impl<'a> From<Pair<'a, Rule>> for Name<'a> {
+    fn from(value: Pair<'a, Rule>) -> Self {
+        let text = SpannedStr::from(value.clone());
+        let v = value.into_inner().next();
+
+        match v.as_ref().map(|v| v.as_rule()) {
+            Some(Rule::special_number) => {
+                let v = v.unwrap().into_inner().next().unwrap();
+                debug_assert_eq!(v.as_rule(), Rule::number);
+                let (line, col) = v.line_col();
+                Self::Numeric(text.text.chars().next().unwrap(), parse_int(v) as usize, Span(LineCol { line, col }, None))
+            },
+            Some(other) => unreachable!("illegal name rule: {:?}", other),
+            None => Self::Named(text.into())
+        }
+    }
+}
+
+impl<'a> From<&'a str> for Name<'a> {
+    fn from(value: &'a str) -> Self {
+        Self::Named(SpannedStr {
+            text: value,
+            span: None
+        })
+    }
+}
+
+impl Display for Name<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Name::Named(n) => f.write_str(n.text),
+            Name::Numeric(c, n, _) => write!(f, "{c}%{n}"),
+        }
+    }
+}
+
+fn find_global_by_name<'a>(ctx: &'a ParsedHeph, global: Name<'_>) -> Result<(u32, &'a Global), AsmError> {
+    Ok(ctx.globals.iter().enumerate()
+        .find_map(|(i, (name, g))| match global {
+            Name::Named(n) => if name == n.text { Some((i as u32, g)) } else { None },
+            Name::Numeric(_, idx, _) => if i == idx { Some((i as u32, g)) } else { None },
+        })
         .ok_or_else(|| AsmError {
-            tgt: global.span,
-            message: format!("global {} not found", global.text)
-        })?.0 as u32)
+            tgt: match global {
+                Name::Named(n) => n.span,
+                Name::Numeric(_, _, span) => Some(span),
+            },
+            message: format!("global {} not found", global)
+        })?)
 }
 
 // local can refer to either params or locals
 // in the final instruction, these are combined, but here they
 // are still separated and need to be adjusted
-fn find_local_by_name(block: &Block, local: SpannedStr<'_>) -> Result<u32, AsmError> {
+fn find_local_by_name(block: &Block, local: Name<'_>) -> Result<u32, AsmError> {
     Ok(block.locals.keys().enumerate()
-        .find(|v| v.1 == local.text)
+        .find(|v| match local {
+            Name::Named(n) => v.1 == n.text,
+            Name::Numeric(_, idx, _) => v.0 == idx,
+        })
         .ok_or_else(|| AsmError {
-            tgt: local.span,
-            message: format!("local {} not found", local.text)
+            tgt: match local {
+                Name::Named(n) => n.span,
+                Name::Numeric(_, _, span) => Some(span),
+            },
+            message: format!("local {} not found", local)
         })?.0 as u32)
 }
 
 impl<'a> ParsedInstruction<'a> {
-    fn parse(parsed: &ParsedHeph, locals: &[(&String, &Type)], value: Pair<'a, Rule>) -> Result<Self, AsmError> {
+    fn parse(parsed: &ParsedHeph, locals: &[(&String, &ComplexType)], value: Pair<'a, Rule>) -> Result<Self, AsmError> {
         debug_assert_eq!(value.as_rule(), Rule::instruction);
         let mut value = value.into_inner();
         let op = value.next().unwrap();
@@ -555,7 +718,7 @@ impl<'a> ParsedInstruction<'a> {
             Rule::OP_MEM_FREE => Ok(Self::MemFree),
             Rule::OP_MEM_LOAD => Ok(Self::MemLoad(value.next().unwrap().into(), value.next().map(Into::into))),
             Rule::OP_MEM_STORE => Ok(Self::MemStore(value.next().unwrap().into(), value.next().map(Into::into))),
-            Rule::OP_DISCARD => Ok(Self::Discard(value.next().map(Into::into))),
+            Rule::OP_DISCARD => Ok(Self::Discard(value.next())),
             Rule::OP_CMP => Ok(Self::Cmp),
             Rule::OP_TEST_GT => Ok(Self::TestGt),
             Rule::OP_TEST_GEQ => Ok(Self::TestGeq),
@@ -563,10 +726,65 @@ impl<'a> ParsedInstruction<'a> {
             Rule::OP_TEST_LEQ => Ok(Self::TestLeq),
             Rule::OP_TEST_EQ => Ok(Self::TestEq),
             Rule::OP_TEST_NEQ => Ok(Self::TestNeq),
-            Rule::OP_DUP => Ok(Self::Duplicate(value.next().map(Into::into))),
+            Rule::OP_DUP => Ok(Self::Duplicate(value.next())),
             other => unreachable!("illegal instruction rule: {other:?}")
         }
     }
+}
+
+fn parse_linkage(parsed: &ParsedHeph, pair: Pair<'_, Rule>) -> Result<Linkage, AsmError> {
+    debug_assert!(pair.as_rule() == Rule::linkage || pair.as_rule() == Rule::type_linkage);
+    let mut pairs = pair.into_inner();
+    let mut still_taking_export_policy = true;
+    let mut linkage = Linkage::Internal(InlinePref::Never);
+    
+    while let Some(pair) = pairs.next() {
+        match pair.as_rule() {
+            Rule::KW_EXPORT if still_taking_export_policy => {
+                still_taking_export_policy = false;
+                
+                let default_flags = LinkageFlags::DOCUMENTED | LinkageFlags::ACCESSIBLE | LinkageFlags::EXPORTED;
+                
+                if pairs.peek().is_some_and(|v| v.as_rule() == Rule::export_mods) {
+                    let flags = pairs.next().unwrap().into_inner()
+                        .fold(default_flags, |f, v| match v.as_rule() {
+                            Rule::KW_ACCESSIBLE => f | LinkageFlags::ACCESSIBLE,
+                            Rule::KW_NO_ACCESSIBLE => f & !LinkageFlags::ACCESSIBLE,
+                            Rule::KW_DOCUMENT => f | LinkageFlags::DOCUMENTED,
+                            Rule::KW_NO_DOCUMENT => f & !LinkageFlags::DOCUMENTED,
+                            other => unreachable!("illegal linkage rule: {other:?}")
+                        });
+                    linkage = Linkage::Export(flags)
+                }
+            }
+            
+            Rule::KW_INTERNAL if still_taking_export_policy => {
+                still_taking_export_policy = false;
+
+                if pairs.peek().is_some_and(|v| v.as_rule() != Rule::name) {
+                    match pairs.next().unwrap().as_rule() {
+                        Rule::KW_INLINE_ALWAYS => linkage = Linkage::Internal(InlinePref::Force),
+                        Rule::KW_INLINE => linkage = Linkage::Internal(InlinePref::Prefer),
+                        other => unreachable!("illegal inline preference rule: {other:?}")
+                    }
+                }
+            }
+            
+            Rule::name => {
+                let (source_module, _) = find_global_by_name(parsed, Name::from(pair))?;
+                let source_name = pairs.next().unwrap().as_str();
+                linkage = Linkage::Import(Box::new(linkage), source_module, source_name.into());
+            }
+            
+            _ => {}
+        }
+    }
+    
+    Ok(linkage)
+}
+
+pub trait ModuleResolver {
+    fn open_module(&self, name: &str);
 }
 
 pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
@@ -593,6 +811,7 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
         match pair.as_rule() {
             Rule::global => {
                 let mut pairs = pair.into_inner();
+                let linkage = parse_linkage(&parsed, pairs.next().unwrap())?;
                 
                 let mutable = if pairs.peek().is_some_and(|r| r.as_rule() == Rule::MUTABLE) {
                     pairs.next();
@@ -600,11 +819,12 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                 } else { false };
                 
                 let name = pairs.next().unwrap();
-                let ty = Type::try_from(SpannedStr::from(pairs.next().unwrap()))?;
+                let ty = ComplexType::parse(&parsed, pairs.next().unwrap())?;
                 let block = pairs.next();
                 
                 parsed.globals.insert(name.as_str().into(), Global::Var(Var {
-                    ty,
+                    ty: ty.clone(),
+                    linkage,
                     mutable,
                     block: if let Some(block) = block {
                         Some(parse_block(&parsed, Some(ty), block, &[])?)
@@ -615,8 +835,9 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
             }
             Rule::function => {
                 let mut pairs = pair.into_inner();
+                let linkage = parse_linkage(&parsed, pairs.next().unwrap())?;
                 let name = pairs.next().unwrap();
-                let (params, ty): (OrderedHashMap<String, Type>, Option<Type>) = {
+                let (params, ty): (OrderedHashMap<String, ComplexType>, Option<ComplexType>) = {
                     let params_or_ty = pairs.next().unwrap();
 
                     let (params, ty) = if params_or_ty.as_rule() == Rule::parameters {
@@ -626,7 +847,7 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                         assert!(ty.as_rule() == Rule::ty || ty.as_rule() == Rule::VOID);
 
                         // parse params
-                        (Some(params.map(parse_local_var).try_collect()?), ty)
+                        (Some(params.map(|v| parse_local_var(&parsed, v)).try_collect()?), ty)
                     } else {
                         (None, params_or_ty)
                     };
@@ -634,15 +855,19 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                     (params.unwrap_or_default(), if ty.as_rule() == Rule::VOID {
                         None
                     } else {
-                        Some(Type::try_from(SpannedStr::from(ty))?)
+                        Some(ComplexType::parse(&parsed, ty)?)
                     })
                 };
-
-                parsed.globals.insert(name.as_str().into(), Global::Function(Function {
-                    params: params.clone(),
-                    block: Block::default()
-                }));
                 
+                let has_import_linkage = matches!(linkage, Linkage::Import(_, _, _));
+                
+                parsed.globals.insert(name.as_str().into(), Global::Function(Function {
+                    linkage,
+                    return_type: ty.clone(),
+                    params: params.clone(),
+                    block: None
+                }));
+
                 let params_vec = params.iter().collect_vec();
                 
                 // this uses a roundabout way because the function body may expect the
@@ -653,10 +878,118 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                 // the above adds a global with an empty block as a placeholder that
                 // the block can refer to, and the below actually builds the block with
                 // said context intact.
-                let block = parse_block(&parsed, ty, pairs.next().unwrap(), &params_vec[..])?;
-                let Global::Function(f) = parsed.globals.get_mut(&String::from(name.as_str())).unwrap() else { unreachable!() };
-                f.block = block;
+                if let Some(block_pair) = pairs.next() {
+                    if has_import_linkage {
+                        return Err(AsmError::new_for(&block_pair, "import declarations cannot have blocks"));
+                    }
+                    
+                    let block = parse_block(&parsed, ty, block_pair, &params_vec[..])?;
+                    let Global::Function(f) = parsed.globals.get_mut(&String::from(name.as_str())).unwrap() else { unreachable!() };
+                    f.block = Some(block);
+                } else if !has_import_linkage {
+                    return Err(AsmError::new_for(&name, "this declaration is missing a block"));
+                }
             },
+            Rule::global_attribute => { /* TODO */ },
+            Rule::import_module => {
+                let pair = pair.into_inner().next().unwrap();
+                
+                match pair.as_rule() {
+                    Rule::import_static => {
+                        let mut pairs = pair.into_inner();
+                        let mut module_name = pairs.next().unwrap().as_str();
+                        module_name = &module_name[1..module_name.len()-1]; // remove quotes
+                        let name = pairs.next().unwrap();
+                        parsed.globals.insert(name.as_str().into(), Global::ImportedModule(ImportedModule::StaticLibrary(module_name.into())));
+                    }
+
+                    Rule::import_dynamic => {
+                        let mut pairs = pair.into_inner();
+                        let mut module_name = pairs.next().unwrap().as_str();
+                        module_name = &module_name[1..module_name.len()-1]; // remove quotes
+                        let name = pairs.next().unwrap();
+                        parsed.globals.insert(name.as_str().into(), Global::ImportedModule(ImportedModule::DynamicLibrary(module_name.into())));
+                    }
+                    
+                    Rule::import_component => {
+                        #[cfg(not(feature = "component-model"))] {
+                            return Err(AsmError::new_for(&pair, "the component model is not supported by this build of hephaestus, you must build hephaestus with the -Fcomponent-model option for this feature"));
+                        }
+                        
+                        #[cfg(feature = "component-model")] {
+                            // TODO ensure that WIT components are enabled
+                            let orig = pair.clone();
+                            let mut pairs = pair.into_inner();
+                            let mut world_name = pairs.next().unwrap().as_str();
+                            world_name = &world_name[1..world_name.len()-1]; // remove quotes
+                            let mut component_name = pairs.next().unwrap().as_str();
+                            component_name = &component_name[1..component_name.len()-1]; // remove quotes
+                            let name = pairs.next().unwrap();
+                            
+                            let wit = wit_component::decode_reader(File::open(component_name).map_err(|e| {
+                                AsmError::new_for(&orig, format!("failed to open WIT component file: {e}"))
+                            })?).map_err(|e| {
+                                AsmError::new_for(&orig, format!("failed to decode WIT component: {e}"))
+                            })?;
+                            
+                            let _world = wit.resolve().select_world(wit.package(), Some(world_name)).map_err(|e| {
+                                AsmError::new_for(&orig, format!("could not find WIT world: {e}"))
+                            })?;
+                            
+                            let encoded = wit_component::encode(wit.resolve(), wit.package()).map_err(|e| {
+                                AsmError::new_for(&orig, format!("failed to re-encode WIT component: {e}"))
+                            })?;
+                            
+                            parsed.globals.insert(name.as_str().into(), Global::ImportedModule(ImportedModule::WitComponent(world_name.into(), Bytes::from(encoded))));
+                        }
+                    }
+                    
+                    other => unreachable!("illegal import module rule: {other:?}")
+                }
+            }
+            Rule::struct_definition => {
+                let mut pairs = pair.into_inner();
+                let linkage = parse_linkage(&parsed, pairs.next().unwrap())?;
+                let name = pairs.next().unwrap();
+                let fields = pairs.map(|i| -> Result<StructField, AsmError> {
+                    let (name, ty) = parse_local_var(&parsed, i)?;
+
+                    // TODO empty space
+                    Ok(StructField::Data {
+                        layout: StructFieldLayout::Automatic, // TODO
+                        name,
+                        ty
+                    })
+                }).try_collect()?;
+
+                let struct_global = Struct {
+                    layout: StructLayout::Hephaestus, // TODO
+                    linkage,
+                    values: fields
+                };
+
+                parsed.globals.insert(name.as_str().into(), Global::Struct(struct_global));
+            }
+            Rule::enum_definition => {
+                let mut pairs = pair.into_inner();
+                let linkage = parse_linkage(&parsed, pairs.next().unwrap())?;
+                let name = pairs.next().unwrap();
+                let backing_type = Type::try_from(SpannedStr::from(pairs.next().unwrap()))?;
+                let fields = pairs.map(|i| -> Result<(String, Const), AsmError> {
+                    let (name, value) = parse_enum_variant(backing_type, i)?;
+
+                    // TODO empty space
+                    Ok((name, value))
+                }).try_collect()?;
+
+                let enum_global = Enum {
+                    backing_type,
+                    linkage,
+                    values: fields
+                };
+
+                parsed.globals.insert(name.as_str().into(), Global::Enum(enum_global));
+            }
             Rule::EOI => break,
             other => unreachable!("illegal declaration rule: {other:?}")
         }
@@ -665,17 +998,27 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
     Ok(parsed)
 }
 
-fn parse_block(parsed: &ParsedHeph, return_type: Option<Type>, block: Pair<Rule>, parent_locals: &[(&String, &Type)]) -> Result<Block, AsmError> {
+fn parse_block(parsed: &ParsedHeph, return_type: Option<ComplexType>, block: Pair<Rule>, parent_locals: &[(&String, &ComplexType)]) -> Result<Block, AsmError> {
     debug_assert_eq!(block.as_rule(), Rule::block);
     
     let mut pairs = block.into_inner().peekable();
 
-    let locals: OrderedHashMap<String, Type> = [
-        parent_locals.iter().map(|(a, b)| ((*a).clone(), **b)).collect_vec(),
-        pairs
+    let block_locals = match pairs.peek().map(|v| v.as_rule()) {
+        Some(Rule::local_var) => pairs
             .peeking_take_while(|v| v.as_rule() == Rule::local_var)
-            .map(parse_local_var)
-            .try_collect::<_, Vec<_>, _>()?
+            .map(|v| parse_local_var(parsed, v))
+            .try_collect::<_, Vec<_>, _>()?,
+        Some(Rule::local_list) => pairs
+            .next().unwrap().into_inner()
+            .enumerate()
+            .map(|(i, ty)| ComplexType::parse(parsed, ty).map(|ty| (format!("@%{}", i + parent_locals.len()), ty)))
+            .try_collect::<_, Vec<_>, _>()?,
+        Some(_) | None => Vec::new(),
+    };
+
+    let locals: OrderedHashMap<String, ComplexType> = [
+        parent_locals.iter().map(|(a, b)| ((*a).clone(), (*b).clone())).collect_vec(),
+        block_locals
     ].into_iter().flatten().collect();
 
     let mut block = Block {
@@ -701,23 +1044,50 @@ fn parse_block(parsed: &ParsedHeph, return_type: Option<Type>, block: Pair<Rule>
     Ok(block)
 }
 
-fn parse_local_var(v: Pair<'_, Rule>) -> Result<(String, Type), AsmError> {
+fn parse_local_var(parsed: &ParsedHeph, v: Pair<'_, Rule>) -> Result<(String, ComplexType), AsmError> {
     debug_assert_eq!(v.as_rule(), Rule::local_var);
 
     let mut pairs = v.into_inner();
     let name = pairs.next().unwrap().as_str().to_string();
-    let ty = Type::try_from(SpannedStr::from(pairs.next().unwrap()));
-    ty.map(|ty| (name, ty))
+    let ty = ComplexType::parse(parsed, pairs.next().unwrap())?;
+    Ok((name, ty))
+}
+
+fn parse_enum_variant(backing_type: Type, v: Pair<'_, Rule>) -> Result<(String, Const), AsmError> {
+    debug_assert_eq!(v.as_rule(), Rule::enum_variant);
+
+    let mut pairs = v.into_inner();
+    let name = pairs.next().unwrap().as_str().to_string();
+    let value = parse_int(pairs.next().unwrap());
+    Ok((name, match backing_type {
+        Type::U8 => Const::U8(value as u8),
+        Type::U16 => Const::U16(value as u16),
+        Type::U32 => Const::U32(value as u32),
+        Type::U64 => Const::U64(value as u64),
+        Type::I8 => Const::I8(value as i8),
+        Type::I16 => Const::I16(value as i16),
+        Type::I32 => Const::I32(value as i32),
+        Type::I64 => Const::I64(value as i64),
+        Type::F32 => Const::F32(value as f32),
+        Type::F64 => Const::F64(value as f64),
+        _ => unreachable!()
+    }))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use std::str::FromStr;
 
     use crate::asm::*;
     use crate::Type;
 
     use super::parse_text_asm;
+    
+    #[derive(Error, Debug)]
+    #[error("assumption not met: {0}")]
+    #[repr(transparent)]
+    struct FailedAssumption(&'static str);
 
     #[test]
     fn old_version_permitted() {
@@ -732,7 +1102,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn new_version_fails() {
-        parse_text_asm(&format!("%hephaestus 99999.0.0")).unwrap();
+        parse_text_asm("%hephaestus 99999.0.0").unwrap();
     }
 
     #[test]
@@ -787,16 +1157,83 @@ mod tests {
 
         let Global::Function(f) = &parsed.globals["@main"] else { unreachable!("main is not function?") };
 
-        assert_eq!(f.block.locals.len() - f.block.inherited_locals, 2);
-        assert_eq!(f.block.locals["$test"], Type::I32);
-        assert_eq!(f.block.locals["$return_value"], Type::I32);
-        let locals: [&str; 2] = f.block.locals.keys().skip(f.block.inherited_locals).map(|v| v.as_str()).collect_array().unwrap();
-        assert!(matches!(locals, ["$test", "$return_value"]), "order of locals was not preserved");
+        assert!(f.block.is_some());
+        
+        if let Some(block) = &f.block {
+            assert_eq!(block.locals.len() - block.inherited_locals, 2);
+            assert_eq!(block.locals["$test"], ComplexType::Primitive(Type::I32));
+            assert_eq!(block.locals["$return_value"], ComplexType::Primitive(Type::I32));
+            let locals: [&str; 2] = block.locals.keys().skip(block.inherited_locals).map(|v| v.as_str()).collect_array().unwrap();
+            assert!(matches!(locals, ["$test", "$return_value"]), "order of locals was not preserved");
+            
+            assert_eq!(block.return_type, f.return_type);
+        } else { unreachable!() }
 
         assert_eq!(f.params.len(), 2);
-        assert_eq!(f.params["$argc"], Type::U32);
-        assert_eq!(f.params["$argv"], Type::UPtr);
+        assert_eq!(f.params["$argc"], ComplexType::Primitive(Type::U32));
+        assert_eq!(f.params["$argv"], ComplexType::Primitive(Type::UPtr));
         let locals: [&str; 2] = f.params.keys().map(|v| v.as_str()).collect_array().unwrap();
         assert!(matches!(locals, ["$argc", "$argv"]), "order of params was not preserved");
+    }
+    
+    #[test]
+    fn complex_types_cannot_be_inline() {
+        assert!(parse_text_asm(r#"
+        %hephaestus 0.1.0
+        
+        internal inline struct @test {
+            $test: i32
+        }
+        "#.trim()).is_err());
+
+        assert!(parse_text_asm(r#"
+        %hephaestus 0.1.0
+        
+        internal inline(always) struct @test {
+            $test: i32
+        }
+        "#.trim()).is_err());
+        
+        assert!(parse_text_asm(r#"
+        %hephaestus 0.1.0
+        
+        internal inline enum @test : u32 {
+            $Test = 69,
+            $Test2 = 420
+        }
+        "#.trim()).is_err());
+
+        assert!(parse_text_asm(r#"
+        %hephaestus 0.1.0
+        
+        internal inline(always) enum @test : u32 {
+            $Test = 69,
+            $Test2 = 420
+        }
+        "#.trim()).is_err());
+    }
+    
+    #[test]
+    fn enum_type_is_equal_to_backing_type() -> Result<(), Box<dyn Error>> {
+        let parsed = parse_text_asm(r#"
+        %hephaestus 0.1.0
+        
+        internal enum @test : u32 {
+            $Test = 69,
+            $Test2 = 420
+        }
+        
+        internal funct @main($test_param: enum @test) -> void {
+        }
+        "#.trim())?;
+        
+        let Global::Enum(e) = find_global_by_name(&parsed, "@test".into())?.1 else { return Err(FailedAssumption("@test was not compiled to an enum").into()); };
+        let Global::Function(f) = find_global_by_name(&parsed, "@main".into())?.1 else { return Err(FailedAssumption("@main was not compiled to a function").into()); };
+        
+        let param = f.params.get("$test_param").ok_or(FailedAssumption("no $test_param"))?;
+        
+        assert_eq!(param.ty(), e.backing_type);
+        
+        Ok(())
     }
 }

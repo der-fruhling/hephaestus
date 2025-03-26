@@ -1,31 +1,43 @@
 %hephaestus 0.1.0
 
-globl @test_imm: u32 = {
+# this is a test comment
+
+/* this is a second test comment */
+
+/*
+ * multiline!
+ */
+
+import static "c" as @libc
+import dynamic "nothing" as @nothinglib
+import world "wasi:cli/command@0.2.0" from component "wasi.wasm" as @wasi
+
+internal globl @test_imm: u32 = {
     const u32 42
     return
 }
 
-globl @test_mut: u_ptr
+internal globl mutable @test_mut: u_ptr
 
-funct @malloc($size: u_ptr) -> u_ptr
-{
-    local.get u_ptr $size
-    mem.alloc
-
-    global.tee u_ptr @test_mut
-
-    return
+internal struct @test_struct {
+    $first: u8,
+    $second: u_ptr
 }
 
-funct @free($ptr: u_ptr) -> u_ptr
-{
-    local.get u_ptr $ptr
-    mem.free
-
-    return
+export enum @test_state : u8 {
+    $Ok = 0,
+    $Errored = 1
 }
 
-funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
+export struct @test_pub_struct {
+    $test: ref @test_struct,
+    $state: enum @test_state
+}
+
+from @libc / malloc import funct @malloc($len: u_ptr) -> u_ptr
+from @libc / free import funct @free($len: u_ptr) -> u_ptr
+
+export funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
 {
     local.get u64 $len
     
@@ -78,7 +90,7 @@ funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
     }
 }
 
-funct @main($argc: u32, $argv: u_ptr) -> i32
+export nodocument noaccessible funct @main($argc: u32, $argv: u_ptr) -> i32
 {
     local $test: i32;
     local $return_value: i32;
@@ -95,6 +107,16 @@ funct @main($argc: u32, $argv: u_ptr) -> i32
     local.get i32 $test
     local.get i32 $return_value
     add
+
+    const u64 69
+    cast u64 -> u_ptr
+    call @malloc
+
+    dup
+    const u64 777
+    mem.store u64 +8
+
+    call @free
 
     return
 }

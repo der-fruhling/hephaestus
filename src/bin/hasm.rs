@@ -1,7 +1,8 @@
 use std::{fs, path::PathBuf, process::ExitCode};
-
+use bytes::Bytes;
 use clap::Parser;
 use hephaestus::asm::parse_text_asm;
+use hephaestus::{MetadataContentKind, MetadataDeclaration, Target};
 
 #[derive(Default, clap::ValueEnum, Clone, Eq, PartialEq)]
 enum OutputMode {
@@ -37,7 +38,25 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS
     }
     
-    let module = asm.finish();
+    let mut module = asm.finish();
+    
+    module.metadata.push(MetadataDeclaration {
+        name: "producer".into(),
+        kind: MetadataContentKind::String,
+        content: Bytes::from_static(b"hephaestus bytecode assembler")
+    });
+
+    module.metadata.push(MetadataDeclaration {
+        name: "producer-version".into(),
+        kind: MetadataContentKind::String,
+        content: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes())
+    });
+
+    module.metadata.push(MetadataDeclaration {
+        name: "producer-target".into(),
+        kind: MetadataContentKind::Target,
+        content: Bytes::from_owner(Target::SELF.into_u16().to_be_bytes())
+    });
     
     if cli.output_mode == OutputMode::DebugModule {
         fs::write(&cli.output_file, format!("{:#?}", module)).unwrap();
