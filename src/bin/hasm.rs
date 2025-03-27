@@ -1,24 +1,25 @@
-use std::{fs, path::PathBuf, process::ExitCode};
 use bytes::Bytes;
 use clap::Parser;
 use hephaestus::asm::parse_text_asm;
 use hephaestus::{MetadataContentKind, MetadataDeclaration, Target};
+use std::{fs, path::PathBuf, process::ExitCode};
 
 #[derive(Default, clap::ValueEnum, Clone, Eq, PartialEq)]
 enum OutputMode {
-    #[default] Normal,
+    #[default]
+    Normal,
     DebugParser,
-    DebugModule
+    DebugModule,
 }
 
 #[derive(clap::Parser)]
 struct Cli {
     #[clap(long, default_value = "normal")]
     output_mode: OutputMode,
-    
+
     #[clap(short, long = "output")]
     output_file: PathBuf,
-    input_file: PathBuf
+    input_file: PathBuf,
 }
 
 fn main() -> ExitCode {
@@ -29,38 +30,38 @@ fn main() -> ExitCode {
         Ok(value) => value,
         Err(e) => {
             eprintln!("error: {e}");
-            return ExitCode::FAILURE
-        },
+            return ExitCode::FAILURE;
+        }
     };
-    
+
     if cli.output_mode == OutputMode::DebugParser {
         fs::write(&cli.output_file, format!("{:#?}", asm)).unwrap();
-        return ExitCode::SUCCESS
+        return ExitCode::SUCCESS;
     }
-    
+
     let mut module = asm.finish();
-    
+
     module.metadata.push(MetadataDeclaration {
         name: "producer".into(),
         kind: MetadataContentKind::String,
-        content: Bytes::from_static(b"hephaestus bytecode assembler")
+        content: Bytes::from_static(b"hephaestus bytecode assembler"),
     });
 
     module.metadata.push(MetadataDeclaration {
         name: "producer-version".into(),
         kind: MetadataContentKind::String,
-        content: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes())
+        content: Bytes::from_static(env!("CARGO_PKG_VERSION").as_bytes()),
     });
 
     module.metadata.push(MetadataDeclaration {
         name: "producer-target".into(),
         kind: MetadataContentKind::Target,
-        content: Bytes::from_owner(Target::SELF.into_u16().to_be_bytes())
+        content: Bytes::from_owner(Target::SELF.into_u16().to_be_bytes()),
     });
-    
+
     if cli.output_mode == OutputMode::DebugModule {
         fs::write(&cli.output_file, format!("{:#?}", module)).unwrap();
-        return ExitCode::SUCCESS
+        return ExitCode::SUCCESS;
     }
 
     fs::write(cli.output_file, module.as_bytes()).unwrap();

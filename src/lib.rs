@@ -3,16 +3,19 @@ mod instruction;
 
 use bitflags::bitflags;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use instruction::{Instruction, Op};
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use ordered_hash_map::OrderedHashMap;
-use std::{collections::HashMap, fmt::{Debug, Display, Formatter}, mem};
 use std::collections::BTreeMap;
-use std::num::NonZeroU16;
 use std::str::FromStr;
 use std::string::FromUtf8Error;
-use lazy_static::lazy_static;
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display, Formatter},
+    mem,
+};
 use thiserror::Error;
-use instruction::{Instruction, Op};
 
 #[derive(Default, Debug)]
 pub struct Module {
@@ -32,7 +35,7 @@ pub struct Module {
 pub struct MetadataDeclaration {
     pub name: String,
     pub kind: MetadataContentKind,
-    pub content: Bytes
+    pub content: Bytes,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -41,19 +44,19 @@ pub struct MetadataDeclaration {
 pub enum MetadataContentKind {
     /// UTF-8 encoded string. Has predefined meaning.
     String = 0x01,
-    
+
     /// Raw binary. Has predefined meaning.
     Bytes = 0x02,
-    
+
     /// Arbitrary CBOR encoded table. Has predefined meaning.
     #[cfg(feature = "cbor-features")]
     CBOR = 0x10,
-    
+
     /// Describes a [Target]. Its usage is defined by surrounding information.
     Target = 0x11,
-    
+
     /// Debug information encoded in the DWARF format.
-    DWARF = 0x80
+    DWARF = 0x80,
 }
 
 impl Display for MetadataContentKind {
@@ -73,7 +76,7 @@ impl MetadataContentKind {
     pub fn into_u8(self) -> u8 {
         self as u8
     }
-    
+
     pub fn from_u8(value: u8) -> Self {
         unsafe { mem::transmute(value) }
     }
@@ -87,30 +90,38 @@ impl Module {
         for (i, item) in self.globals.iter().enumerate() {
             match item {
                 Item::Function(f) => {
-                    if let Some(name) = &f.name { self.functions.insert(name.clone(), i); }
-                },
+                    if let Some(name) = &f.name {
+                        self.functions.insert(name.clone(), i);
+                    }
+                }
                 Item::Global(f) => {
-                    if let Some(name) = &f.name { self.global_vars.insert(name.clone(), i); }
-                },
+                    if let Some(name) = &f.name {
+                        self.global_vars.insert(name.clone(), i);
+                    }
+                }
                 Item::ImportedModule(m) => {
                     let n = match m {
                         ImportedModule::DynamicLibrary(n) => n,
                         ImportedModule::StaticLibrary(n) => n,
-                        ImportedModule::WitComponent(n, _) => n
+                        ImportedModule::WitComponent(n, _) => n,
                     };
-                    
+
                     self.imported_modules.insert(n.clone(), i);
                 }
                 Item::Struct(s) => {
-                    if let Some(name) = &s.name { self.structs.insert(name.clone(), i); }
+                    if let Some(name) = &s.name {
+                        self.structs.insert(name.clone(), i);
+                    }
                 }
                 Item::Enum(e) => {
-                    if let Some(name) = &e.name { self.enums.insert(name.clone(), i); }
+                    if let Some(name) = &e.name {
+                        self.enums.insert(name.clone(), i);
+                    }
                 }
             };
         }
     }
-    
+
     pub fn as_bytes(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         self.encode(&mut bytes);
@@ -121,7 +132,7 @@ impl Module {
         let index = *self.functions.get(name)?;
         self.globals.get(index).and_then(|v| match v {
             Item::Function(f) => Some(f),
-            _other => None
+            _other => None,
         })
     }
 
@@ -129,7 +140,7 @@ impl Module {
         let index = *self.global_vars.get(name)?;
         self.globals.get(index).and_then(|v| match v {
             Item::Global(g) => Some(g),
-            _other => None
+            _other => None,
         })
     }
 
@@ -162,7 +173,7 @@ pub enum ImportedModule {
     /// result in an error.
     ///
     /// Only supported on WebAssembly when targeting the component model.
-    WitComponent(String, Bytes)
+    WitComponent(String, Bytes),
 }
 
 impl ImportedModule {
@@ -219,7 +230,7 @@ impl BinaryEncodable for ImportedModule {
 
                 Ok(ImportedModule::WitComponent(name, content))
             }
-            _ => Err(DecodeError::InvalidImportedModuleType)
+            _ => Err(DecodeError::InvalidImportedModuleType),
         }
     }
 }
@@ -247,7 +258,7 @@ pub enum Target {
     WebAssembly32Module = 0xD000,
     WebAssembly32PartialModule = 0xD001,
     WebAssembly32Component = 0xD010,
-    WebAssembly32PartialComponent = 0xD011
+    WebAssembly32PartialComponent = 0xD011,
 }
 
 impl Target {
@@ -279,7 +290,7 @@ impl Target {
         return Target::WebAssembly32Component;
         Target::AmbiguousTarget
     }
-    
+
     pub const SELF: Self = Self::get_self();
 }
 
@@ -299,10 +310,16 @@ lazy_static! {
         ("wasm32/module", Target::WebAssembly32Module),
         ("wasm32/module_part", Target::WebAssembly32PartialModule),
         ("wasm32/component", Target::WebAssembly32Component),
-        ("wasm32/component_part", Target::WebAssembly32PartialComponent),
+        (
+            "wasm32/component_part",
+            Target::WebAssembly32PartialComponent
+        ),
     ]);
-    
-    static ref TARGET_NAMES: BTreeMap<Target, &'static str> = (*TARGETS).clone().into_iter().map(|(a, b)| (b, a)).collect::<BTreeMap<_, _>>();
+    static ref TARGET_NAMES: BTreeMap<Target, &'static str> = (*TARGETS)
+        .clone()
+        .into_iter()
+        .map(|(a, b)| (b, a))
+        .collect::<BTreeMap<_, _>>();
 }
 
 #[derive(Error, Debug)]
@@ -311,9 +328,12 @@ pub struct InvalidTargetError(String);
 
 impl FromStr for Target {
     type Err = InvalidTargetError;
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        TARGETS.get(s).copied().ok_or_else(|| InvalidTargetError(s.to_string()))
+        TARGETS
+            .get(s)
+            .copied()
+            .ok_or_else(|| InvalidTargetError(s.to_string()))
     }
 }
 
@@ -366,7 +386,9 @@ pub enum DecodeError {
 
 pub trait BinaryEncodable {
     fn encode(&self, bytes: &mut BytesMut);
-    fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError> where Self: Sized;
+    fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
+    where
+        Self: Sized;
 }
 
 const MODULE_MAGIC: u32 = 0xCAFEEE77;
@@ -374,56 +396,56 @@ const CURRENT_VERSION: u16 = 0;
 
 type ModuleDecoderFn = fn(&mut Bytes) -> Result<Module, DecodeError>;
 
-static MODULE_DECODERS: &[ModuleDecoderFn] = &[
-    |bytes| -> Result<Module, DecodeError> {
-        let flags = ModuleFlags::from_bits_retain(bytes.get_u32());
-        let target = Target::from_u16(bytes.get_u16());
+static MODULE_DECODERS: &[ModuleDecoderFn] = &[|bytes| -> Result<Module, DecodeError> {
+    let flags = ModuleFlags::from_bits_retain(bytes.get_u32());
+    let target = Target::from_u16(bytes.get_u16());
 
-        let custom_features = if flags.contains(ModuleFlags::HAS_CUSTOM_FEATURES) {
-            let mut custom_features = vec![];
-            let feature_len = bytes.get_u16() as usize;
+    let custom_features = if flags.contains(ModuleFlags::HAS_CUSTOM_FEATURES) {
+        let mut custom_features = vec![];
+        let feature_len = bytes.get_u16() as usize;
 
-            for _ in 0..feature_len {
-                let name_len = bytes.get_u16() as usize;
-                let name = String::from_utf8_lossy(&bytes.split_to(name_len)).into_owned();
-                let kind = MetadataContentKind::from_u8(bytes.get_u8());
-                let content_len = bytes.get_u16() as usize;
-                let content = bytes.split_to(content_len);
-                custom_features.push(MetadataDeclaration {
-                    name,
-                    kind,
-                    content
-                })
-            }
-
-            custom_features
-        } else { vec![] };
-
-        let global_len = bytes.get_u32() as usize;
-        let mut globals = vec![];
-
-        for _ in 0..global_len {
-            globals.push(Item::decode(bytes)?);
+        for _ in 0..feature_len {
+            let name_len = bytes.get_u16() as usize;
+            let name = String::from_utf8_lossy(&bytes.split_to(name_len)).into_owned();
+            let kind = MetadataContentKind::from_u8(bytes.get_u8());
+            let content_len = bytes.get_u16() as usize;
+            let content = bytes.split_to(content_len);
+            custom_features.push(MetadataDeclaration {
+                name,
+                kind,
+                content,
+            })
         }
 
-        let mut module = Module {
-            version: 0,
-            flags,
-            target,
-            metadata: custom_features,
-            globals,
-            imported_modules: Default::default(),
-            functions: Default::default(),
-            global_vars: Default::default(),
-            structs: Default::default(),
-            enums: Default::default()
-        };
+        custom_features
+    } else {
+        vec![]
+    };
 
-        module.recalculate();
+    let global_len = bytes.get_u32() as usize;
+    let mut globals = vec![];
 
-        Ok(module)
+    for _ in 0..global_len {
+        globals.push(Item::decode(bytes)?);
     }
-];
+
+    let mut module = Module {
+        version: 0,
+        flags,
+        target,
+        metadata: custom_features,
+        globals,
+        imported_modules: Default::default(),
+        functions: Default::default(),
+        global_vars: Default::default(),
+        structs: Default::default(),
+        enums: Default::default(),
+    };
+
+    module.recalculate();
+
+    Ok(module)
+}];
 
 impl BinaryEncodable for Module {
     fn encode(&self, bytes: &mut BytesMut) {
@@ -435,7 +457,7 @@ impl BinaryEncodable for Module {
         let mut flags = self.flags;
         flags.set(ModuleFlags::HAS_CUSTOM_FEATURES, !self.metadata.is_empty());
         bytes.put_u32(flags.bits());
-        
+
         bytes.put_u16(self.target.into_u16());
 
         if !self.metadata.is_empty() {
@@ -462,11 +484,13 @@ impl BinaryEncodable for Module {
         Self: Sized,
     {
         let magic = bytes.get_u32();
-        if magic != MODULE_MAGIC { return Err(DecodeError::MissingMagic); }
+        if magic != MODULE_MAGIC {
+            return Err(DecodeError::MissingMagic);
+        }
 
         let version = bytes.get_u16();
         if version > CURRENT_VERSION {
-            return Err(DecodeError::UnsupportedVersion(version))
+            return Err(DecodeError::UnsupportedVersion(version));
         }
 
         MODULE_DECODERS[version as usize](bytes)
@@ -501,7 +525,7 @@ bitflags! {
         /// can access it.
         /// Only global variables may have this flag.
         const IS_MUTABLE = 1 << 6;
-        
+
         const FORCE_INLINE = 1 << 7;
         const INLINE = 1 << 8;
     }
@@ -522,7 +546,7 @@ pub enum Type {
     F32 = 9,
     F64 = 10,
     UPtr = 11,
-    IPtr = 12
+    IPtr = 12,
 }
 
 impl Display for Type {
@@ -567,7 +591,7 @@ impl BinaryEncodable for Const {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         let ty = Type::from_u8(bytes.get_u8());
         Self::decode_value(bytes, ty)
@@ -602,7 +626,7 @@ impl Const {
             Type::I64 => Ok(Const::I64(bytes.get_i64())),
             Type::F32 => Ok(Const::F32(bytes.get_f32())),
             Type::F64 => Ok(Const::F64(bytes.get_f64())),
-            other => Err(DecodeError::InvalidPrimitiveType(other.into_u8()))
+            other => Err(DecodeError::InvalidPrimitiveType(other.into_u8())),
         }
     }
 
@@ -646,8 +670,10 @@ impl Type {
 
     pub fn from_u8(val: u8) -> Self {
         let val = val & 0x3F;
-        if val == 0x3F { return Self::UPtr }
-        
+        if val == 0x3F {
+            return Self::UPtr;
+        }
+
         unsafe { mem::transmute(val) }
     }
 }
@@ -658,7 +684,7 @@ pub enum Item {
     Global(Global),
     Function(Function),
     Struct(Struct),
-    Enum(Enum)
+    Enum(Enum),
 }
 
 impl Item {
@@ -705,7 +731,7 @@ impl BinaryEncodable for Item {
             Self::IMPORTED_MODULE => Ok(Item::ImportedModule(ImportedModule::decode(bytes)?)),
             Self::STRUCT => Ok(Item::Struct(Struct::decode(bytes)?)),
             Self::ENUM => Ok(Item::Enum(Enum::decode(bytes)?)),
-            other => Err(DecodeError::InvalidItemType(other))
+            other => Err(DecodeError::InvalidItemType(other)),
         }
     }
 }
@@ -713,7 +739,7 @@ impl BinaryEncodable for Item {
 #[derive(Debug, Clone)]
 pub struct Source {
     pub module: u32,
-    pub item: String
+    pub item: String,
 }
 
 #[derive(Debug)]
@@ -723,7 +749,7 @@ pub struct Global {
     pub linkage: LinkageFlags,
     pub ty: ComplexType,
     pub mutable: bool,
-    pub initializer: Option<Block>
+    pub initializer: Option<Block>,
 }
 
 impl BinaryEncodable for Global {
@@ -735,7 +761,7 @@ impl BinaryEncodable for Global {
 
         bytes.put_u16(linkage.bits());
         self.ty.encode(bytes);
-        
+
         if let Some(source) = &self.source {
             bytes.put_u32(source.module);
             bytes.put_u16(source.item.len() as u16);
@@ -768,15 +794,19 @@ impl BinaryEncodable for Global {
     {
         let linkage = LinkageFlags::from_bits(bytes.get_u16()).ok_or(DecodeError::InvalidFlags)?;
         let ty = ComplexType::decode(bytes)?;
-        
+
         let source = if linkage.contains(LinkageFlags::IMPORTED) {
             let module = bytes.get_u32();
             let item_len = bytes.get_u16() as usize;
             let item = String::from_utf8(bytes.split_to(item_len).into()).unwrap();
             Some(Source { module, item })
-        } else { None };
+        } else {
+            None
+        };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        let name = if linkage.contains(LinkageFlags::EXPORTED)
+            || linkage.contains(LinkageFlags::IMPORTED)
+        {
             let name_len = bytes.get_u16() as usize;
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
@@ -785,22 +815,28 @@ impl BinaryEncodable for Global {
 
         let initializer = if linkage.contains(LinkageFlags::HAS_BLOCK) {
             let local_count = bytes.get_u16() as usize;
-            let locals = bytes.split_to(local_count).into_iter().map(Type::from_u8).collect_vec();
+            let locals = bytes
+                .split_to(local_count)
+                .into_iter()
+                .map(Type::from_u8)
+                .collect_vec();
             let mut instructions = Vec::<Instruction>::new();
 
             loop {
                 match Instruction::decode(bytes) {
                     Ok(instruction) => instructions.push(instruction),
                     Err(DecodeError::BlockEnd(Op::End)) => break,
-                    Err(e) => return Err(e)
+                    Err(e) => return Err(e),
                 };
             }
 
             Some(Block {
                 locals,
-                ops: instructions
+                ops: instructions,
             })
-        } else { None };
+        } else {
+            None
+        };
 
         Ok(Global {
             name,
@@ -820,7 +856,7 @@ pub struct Function {
     pub source: Option<Source>,
     pub return_type: Option<ComplexType>,
     pub params: OrderedHashMap<String, ComplexType>,
-    pub block: Option<Block>
+    pub block: Option<Block>,
 }
 
 impl BinaryEncodable for Function {
@@ -881,45 +917,62 @@ impl BinaryEncodable for Function {
             let item_len = bytes.get_u16() as usize;
             let item = String::from_utf8(bytes.split_to(item_len).into()).unwrap();
             Some(Source { module, item })
-        } else { None };
+        } else {
+            None
+        };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        let name = if linkage.contains(LinkageFlags::EXPORTED)
+            || linkage.contains(LinkageFlags::IMPORTED)
+        {
             let name_len = bytes.get_u16() as usize;
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
             None
         };
 
-        let return_type = if bytes[0] != 0xFF { Some(ComplexType::decode(bytes)?) } else { bytes.advance(1); None };
+        let return_type = if bytes[0] != 0xFF {
+            Some(ComplexType::decode(bytes)?)
+        } else {
+            bytes.advance(1);
+            None
+        };
 
         let param_len = bytes.get_u16();
-        let params = (0..param_len).map(|_| -> Result<(String, ComplexType), DecodeError> {
-            let name_len = bytes.get_u16() as usize;
-            let name = String::from_utf8_lossy(&bytes.split_to(name_len)).into_owned();
+        let params = (0..param_len)
+            .map(|_| -> Result<(String, ComplexType), DecodeError> {
+                let name_len = bytes.get_u16() as usize;
+                let name = String::from_utf8_lossy(&bytes.split_to(name_len)).into_owned();
 
-            let ty = ComplexType::decode(bytes)?;
+                let ty = ComplexType::decode(bytes)?;
 
-            Ok((name, ty))
-        }).try_collect()?;
+                Ok((name, ty))
+            })
+            .try_collect()?;
 
         let block = if linkage.contains(LinkageFlags::HAS_BLOCK) {
             let local_count = bytes.get_u16() as usize;
-            let locals = bytes.split_to(local_count).into_iter().map(Type::from_u8).collect_vec();
+            let locals = bytes
+                .split_to(local_count)
+                .into_iter()
+                .map(Type::from_u8)
+                .collect_vec();
             let mut instructions = Vec::<Instruction>::new();
 
             loop {
                 match Instruction::decode(bytes) {
                     Ok(instruction) => instructions.push(instruction),
                     Err(DecodeError::BlockEnd(Op::End)) => break,
-                    Err(e) => return Err(e)
+                    Err(e) => return Err(e),
                 };
             }
 
             Some(Block {
                 locals,
-                ops: instructions
+                ops: instructions,
             })
-        } else { None };
+        } else {
+            None
+        };
 
         Ok(Self {
             linkage,
@@ -927,7 +980,7 @@ impl BinaryEncodable for Function {
             name,
             return_type,
             params,
-            block
+            block,
         })
     }
 }
@@ -936,8 +989,9 @@ impl BinaryEncodable for Function {
 #[repr(u8)]
 #[non_exhaustive]
 pub enum StructLayout {
-    #[default] Hephaestus = 0,
-    CStyle = 1
+    #[default]
+    Hephaestus = 0,
+    CStyle = 1,
 }
 
 impl StructLayout {
@@ -960,7 +1014,7 @@ pub enum ComplexType {
     /// Considered the same type as it's [backing type][Enum::backing_type].
     Enum(Type, u32),
 
-    AliasedType(Box<ComplexType>, u32)
+    AliasedType(Box<ComplexType>, u32),
 }
 
 impl Display for ComplexType {
@@ -969,7 +1023,7 @@ impl Display for ComplexType {
             ComplexType::Primitive(ty) => Display::fmt(ty, f),
             ComplexType::StructRef(g) => write!(f, "ref @%{g}"),
             ComplexType::Enum(ty, g) => write!(f, "enum /* {ty} */ @%{g}"),
-            ComplexType::AliasedType(_, g) => write!(f, "type @%{g}")
+            ComplexType::AliasedType(_, g) => write!(f, "type @%{g}"),
         }
     }
 }
@@ -978,13 +1032,13 @@ impl ComplexType {
     const STRUCT_REF: u8 = 0x3F;
     const ALIAS: u8 = 0x40;
     const ENUM: u8 = 0x80;
-    
+
     pub fn ty(&self) -> Type {
         match self {
             ComplexType::Primitive(ty) => *ty,
             ComplexType::StructRef(_) => Type::UPtr,
             ComplexType::Enum(ty, _) => *ty,
-            ComplexType::AliasedType(ty, _) => ty.ty()
+            ComplexType::AliasedType(ty, _) => ty.ty(),
         }
     }
 
@@ -1003,14 +1057,28 @@ impl BinaryEncodable for ComplexType {
     fn encode(&self, bytes: &mut BytesMut) {
         match self {
             ComplexType::Primitive(ty) => bytes.put_u8(ty.into_u8()),
-            ComplexType::StructRef(name) => { bytes.put_u8(Self::STRUCT_REF); bytes.put_u32(*name); }
-            ComplexType::Enum(ty, name) => { bytes.put_u8(Self::ENUM | ty.into_u8()); bytes.put_u32(*name); }
+            ComplexType::StructRef(name) => {
+                bytes.put_u8(Self::STRUCT_REF);
+                bytes.put_u32(*name);
+            }
+            ComplexType::Enum(ty, name) => {
+                bytes.put_u8(Self::ENUM | ty.into_u8());
+                bytes.put_u32(*name);
+            }
             ComplexType::AliasedType(ty, name) => {
                 match **ty {
-                    ComplexType::Primitive(t) => { bytes.put_u8(Self::ALIAS | t.into_u8()) },
-                    ComplexType::StructRef(name) => { bytes.put_u8(Self::STRUCT_REF | Self::ALIAS); bytes.put_u32(name); }
-                    ComplexType::Enum(t, name) => { bytes.put_u8(Self::ENUM | Self::ALIAS | t.into_u8()); bytes.put_u32(name); }
-                    ComplexType::AliasedType(_, _) => panic!("alias must be fully resolved to be encodable"),
+                    ComplexType::Primitive(t) => bytes.put_u8(Self::ALIAS | t.into_u8()),
+                    ComplexType::StructRef(name) => {
+                        bytes.put_u8(Self::STRUCT_REF | Self::ALIAS);
+                        bytes.put_u32(name);
+                    }
+                    ComplexType::Enum(t, name) => {
+                        bytes.put_u8(Self::ENUM | Self::ALIAS | t.into_u8());
+                        bytes.put_u32(name);
+                    }
+                    ComplexType::AliasedType(_, _) => {
+                        panic!("alias must be fully resolved to be encodable")
+                    }
                 }
 
                 bytes.put_u32(*name);
@@ -1020,7 +1088,7 @@ impl BinaryEncodable for ComplexType {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         let b = bytes.get_u8();
 
@@ -1041,7 +1109,7 @@ pub struct Struct {
     pub linkage: LinkageFlags,
     pub name: Option<String>,
     pub source: Option<Source>,
-    pub values: Vec<StructField>
+    pub values: Vec<StructField>,
 }
 
 impl BinaryEncodable for Struct {
@@ -1072,7 +1140,7 @@ impl BinaryEncodable for Struct {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         let layout = StructLayout::from_u8(bytes.get_u8());
         let linkage = LinkageFlags::from_bits_retain(bytes.get_u16());
@@ -1082,22 +1150,30 @@ impl BinaryEncodable for Struct {
             let item_len = bytes.get_u16() as usize;
             let item = String::from_utf8(bytes.split_to(item_len).into()).unwrap();
             Some(Source { module, item })
-        } else { None };
+        } else {
+            None
+        };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        let name = if linkage.contains(LinkageFlags::EXPORTED)
+            || linkage.contains(LinkageFlags::IMPORTED)
+        {
             let name_len = bytes.get_u16() as usize;
             let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
             Some(name)
-        } else { None };
+        } else {
+            None
+        };
 
         let value_len = bytes.get_u16() as usize;
-        let values = (0..value_len).map(|_| StructField::decode(bytes)).try_collect()?;
+        let values = (0..value_len)
+            .map(|_| StructField::decode(bytes))
+            .try_collect()?;
         Ok(Self {
             layout,
             linkage,
             source,
             name,
-            values
+            values,
         })
     }
 }
@@ -1108,7 +1184,7 @@ pub struct Enum {
     pub linkage: LinkageFlags,
     pub name: Option<String>,
     pub source: Option<Source>,
-    pub values: OrderedHashMap<String, Const>
+    pub values: OrderedHashMap<String, Const>,
 }
 
 impl BinaryEncodable for Enum {
@@ -1143,7 +1219,7 @@ impl BinaryEncodable for Enum {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         let backing_type = Type::from_u8(bytes.get_u8());
         let linkage = LinkageFlags::from_bits_retain(bytes.get_u16());
@@ -1153,23 +1229,37 @@ impl BinaryEncodable for Enum {
             let item_len = bytes.get_u16() as usize;
             let item = String::from_utf8(bytes.split_to(item_len).into()).unwrap();
             Some(Source { module, item })
-        } else { None };
+        } else {
+            None
+        };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        let name = if linkage.contains(LinkageFlags::EXPORTED)
+            || linkage.contains(LinkageFlags::IMPORTED)
+        {
             let name_len = bytes.get_u16() as usize;
             let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
             Some(name)
-        } else { None };
+        } else {
+            None
+        };
 
         let value_len = bytes.get_u16() as usize;
-        let values = (0..value_len).map(|_| -> Result<(String, Const), DecodeError> {
-            let name_len = bytes.get_u16() as usize;
-            let name = String::from_utf8(bytes.split_to(name_len).into())?;
-            let value = Const::decode_value(bytes, backing_type)?;
-            Ok((name, value))
-        }).try_collect()?;
+        let values = (0..value_len)
+            .map(|_| -> Result<(String, Const), DecodeError> {
+                let name_len = bytes.get_u16() as usize;
+                let name = String::from_utf8(bytes.split_to(name_len).into())?;
+                let value = Const::decode_value(bytes, backing_type)?;
+                Ok((name, value))
+            })
+            .try_collect()?;
 
-        Ok(Self { backing_type, linkage, source, name, values })
+        Ok(Self {
+            backing_type,
+            linkage,
+            source,
+            name,
+            values,
+        })
     }
 }
 
@@ -1177,7 +1267,7 @@ impl BinaryEncodable for Enum {
 pub enum StructFieldLayout {
     Automatic,
     Align(u8),
-    Custom(i16)
+    Custom(i16),
 }
 
 impl StructFieldLayout {
@@ -1203,13 +1293,13 @@ impl BinaryEncodable for StructFieldLayout {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         match bytes.get_u8() {
             Self::AUTO => Ok(Self::Automatic),
             Self::ALIGN => Ok(Self::Align(bytes.get_u8())),
             Self::CUSTOM => Ok(Self::Custom(bytes.get_i16())),
-            _ => Err(DecodeError::InvalidVariant)
+            _ => Err(DecodeError::InvalidVariant),
         }
     }
 }
@@ -1219,9 +1309,9 @@ pub enum StructField {
     Data {
         layout: StructFieldLayout,
         name: String,
-        ty: ComplexType
+        ty: ComplexType,
     },
-    EmptySpace(u16)
+    EmptySpace(u16),
 }
 
 impl StructField {
@@ -1249,7 +1339,7 @@ impl BinaryEncodable for StructField {
 
     fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
     where
-        Self: Sized
+        Self: Sized,
     {
         match bytes.get_u8() {
             Self::DATA => Ok(Self::Data {
@@ -1261,7 +1351,7 @@ impl BinaryEncodable for StructField {
                 },
             }),
             Self::EMPTY_SPACE => Ok(Self::EmptySpace(bytes.get_u16())),
-            _ => Err(DecodeError::InvalidVariant)
+            _ => Err(DecodeError::InvalidVariant),
         }
     }
 }
@@ -1269,7 +1359,7 @@ impl BinaryEncodable for StructField {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub locals: Vec<Type>,
-    pub ops: Vec<Instruction>
+    pub ops: Vec<Instruction>,
 }
 
 struct Locals<T: Display>(T);
@@ -1283,14 +1373,18 @@ impl<T: Display> Display for Locals<T> {
 impl Display for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("{")?;
-        
+
         if !self.locals.is_empty() {
-            write!(f, "\n{}\n", Indent(Locals(self.locals.iter().join(", ")), 1))?;
+            write!(
+                f,
+                "\n{}\n",
+                Indent(Locals(self.locals.iter().join(", ")), 1)
+            )?;
         }
 
         for i in self.ops.iter().map(|l| Indent(l, 1)) {
             write!(f, "\n{i}")?;
-        };
+        }
 
         f.write_str("\n}")
     }

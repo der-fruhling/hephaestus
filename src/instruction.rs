@@ -1,7 +1,7 @@
+use crate::{BinaryEncodable, Block, Const, DecodeError, Type};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use std::fmt::{Debug, Display, Formatter, Write};
 use itertools::Itertools;
-use crate::{BinaryEncodable, Block, Const, DecodeError, Indent, Type};
+use std::fmt::{Debug, Display, Formatter, Write};
 
 #[derive(Clone)]
 pub enum Instruction {
@@ -44,7 +44,7 @@ pub enum Instruction {
     Load(Type, i16),
     Store(Type, i16),
     Discard,
-    Duplicate
+    Duplicate,
 }
 
 #[allow(non_camel_case_types)]
@@ -191,7 +191,7 @@ pub enum Op {
     Duplicate,
 
     /// ends any block
-    End = 0xff
+    End = 0xff,
 }
 
 impl Op {
@@ -208,68 +208,242 @@ impl BinaryEncodable for Instruction {
     fn encode(&self, bytes: &mut BytesMut) {
         match self {
             Instruction::Nop => bytes.put_u8(Op::Nop.into_u8()),
-            Instruction::Const(Const::U8(v)) => { bytes.put_u8(Op::ConstU8.into_u8()); bytes.put_u8(*v); },
-            Instruction::Const(Const::U16(v)) => { bytes.put_u8(Op::ConstU16.into_u8()); bytes.put_u16(*v); },
-            Instruction::Const(Const::U32(v)) => { bytes.put_u8(Op::ConstU32.into_u8()); bytes.put_u32(*v); },
-            Instruction::Const(Const::U64(v)) => { bytes.put_u8(Op::ConstU64.into_u8()); bytes.put_u64(*v); },
-            Instruction::Const(Const::I8(v)) => { bytes.put_u8(Op::ConstI8.into_u8()); bytes.put_i8(*v); },
-            Instruction::Const(Const::I16(v)) => { bytes.put_u8(Op::ConstI16.into_u8()); bytes.put_i16(*v); },
-            Instruction::Const(Const::I32(v)) => { bytes.put_u8(Op::ConstI32.into_u8()); bytes.put_i32(*v); },
-            Instruction::Const(Const::I64(v)) => { bytes.put_u8(Op::ConstI64.into_u8()); bytes.put_i64(*v); },
-            Instruction::Const(Const::F32(v)) => { bytes.put_u8(Op::ConstF32.into_u8()); bytes.put_f32(*v); },
-            Instruction::Const(Const::F64(v)) => { bytes.put_u8(Op::ConstF64.into_u8()); bytes.put_f64(*v); },
+            Instruction::Const(Const::U8(v)) => {
+                bytes.put_u8(Op::ConstU8.into_u8());
+                bytes.put_u8(*v);
+            }
+            Instruction::Const(Const::U16(v)) => {
+                bytes.put_u8(Op::ConstU16.into_u8());
+                bytes.put_u16(*v);
+            }
+            Instruction::Const(Const::U32(v)) => {
+                bytes.put_u8(Op::ConstU32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::Const(Const::U64(v)) => {
+                bytes.put_u8(Op::ConstU64.into_u8());
+                bytes.put_u64(*v);
+            }
+            Instruction::Const(Const::I8(v)) => {
+                bytes.put_u8(Op::ConstI8.into_u8());
+                bytes.put_i8(*v);
+            }
+            Instruction::Const(Const::I16(v)) => {
+                bytes.put_u8(Op::ConstI16.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Const(Const::I32(v)) => {
+                bytes.put_u8(Op::ConstI32.into_u8());
+                bytes.put_i32(*v);
+            }
+            Instruction::Const(Const::I64(v)) => {
+                bytes.put_u8(Op::ConstI64.into_u8());
+                bytes.put_i64(*v);
+            }
+            Instruction::Const(Const::F32(v)) => {
+                bytes.put_u8(Op::ConstF32.into_u8());
+                bytes.put_f32(*v);
+            }
+            Instruction::Const(Const::F64(v)) => {
+                bytes.put_u8(Op::ConstF64.into_u8());
+                bytes.put_f64(*v);
+            }
 
-            Instruction::SetGlobal(Type::U8, v) => { bytes.put_u8(Op::SetGlobalU8.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::U16, v) => { bytes.put_u8(Op::SetGlobalU16.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::U32, v) => { bytes.put_u8(Op::SetGlobalU32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::U64, v) => { bytes.put_u8(Op::SetGlobalU64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::I8, v) => { bytes.put_u8(Op::SetGlobalI8.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::I16, v) => { bytes.put_u8(Op::SetGlobalI16.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::I32, v) => { bytes.put_u8(Op::SetGlobalI32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::I64, v) => { bytes.put_u8(Op::SetGlobalI64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::F32, v) => { bytes.put_u8(Op::SetGlobalF32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::F64, v) => { bytes.put_u8(Op::SetGlobalF64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::UPtr, v) => { bytes.put_u8(Op::SetGlobalUptr.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetGlobal(Type::IPtr, v) => { bytes.put_u8(Op::SetGlobalIptr.into_u8()); bytes.put_u32(*v); },
+            Instruction::SetGlobal(Type::U8, v) => {
+                bytes.put_u8(Op::SetGlobalU8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::U16, v) => {
+                bytes.put_u8(Op::SetGlobalU16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::U32, v) => {
+                bytes.put_u8(Op::SetGlobalU32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::U64, v) => {
+                bytes.put_u8(Op::SetGlobalU64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::I8, v) => {
+                bytes.put_u8(Op::SetGlobalI8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::I16, v) => {
+                bytes.put_u8(Op::SetGlobalI16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::I32, v) => {
+                bytes.put_u8(Op::SetGlobalI32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::I64, v) => {
+                bytes.put_u8(Op::SetGlobalI64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::F32, v) => {
+                bytes.put_u8(Op::SetGlobalF32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::F64, v) => {
+                bytes.put_u8(Op::SetGlobalF64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::UPtr, v) => {
+                bytes.put_u8(Op::SetGlobalUptr.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetGlobal(Type::IPtr, v) => {
+                bytes.put_u8(Op::SetGlobalIptr.into_u8());
+                bytes.put_u32(*v);
+            }
 
-            Instruction::GetGlobal(Type::U8, v) => { bytes.put_u8(Op::GetGlobalU8.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::U16, v) => { bytes.put_u8(Op::GetGlobalU16.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::U32, v) => { bytes.put_u8(Op::GetGlobalU32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::U64, v) => { bytes.put_u8(Op::GetGlobalU64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::I8, v) => { bytes.put_u8(Op::GetGlobalI8.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::I16, v) => { bytes.put_u8(Op::GetGlobalI16.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::I32, v) => { bytes.put_u8(Op::GetGlobalI32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::I64, v) => { bytes.put_u8(Op::GetGlobalI64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::F32, v) => { bytes.put_u8(Op::GetGlobalF32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::F64, v) => { bytes.put_u8(Op::GetGlobalF64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::UPtr, v) => { bytes.put_u8(Op::GetGlobalUptr.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetGlobal(Type::IPtr, v) => { bytes.put_u8(Op::GetGlobalIptr.into_u8()); bytes.put_u32(*v); },
+            Instruction::GetGlobal(Type::U8, v) => {
+                bytes.put_u8(Op::GetGlobalU8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::U16, v) => {
+                bytes.put_u8(Op::GetGlobalU16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::U32, v) => {
+                bytes.put_u8(Op::GetGlobalU32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::U64, v) => {
+                bytes.put_u8(Op::GetGlobalU64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::I8, v) => {
+                bytes.put_u8(Op::GetGlobalI8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::I16, v) => {
+                bytes.put_u8(Op::GetGlobalI16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::I32, v) => {
+                bytes.put_u8(Op::GetGlobalI32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::I64, v) => {
+                bytes.put_u8(Op::GetGlobalI64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::F32, v) => {
+                bytes.put_u8(Op::GetGlobalF32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::F64, v) => {
+                bytes.put_u8(Op::GetGlobalF64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::UPtr, v) => {
+                bytes.put_u8(Op::GetGlobalUptr.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetGlobal(Type::IPtr, v) => {
+                bytes.put_u8(Op::GetGlobalIptr.into_u8());
+                bytes.put_u32(*v);
+            }
 
-            Instruction::SetLocal(Type::U8, v) => { bytes.put_u8(Op::SetLocalU8.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::U16, v) => { bytes.put_u8(Op::SetLocalU16.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::U32, v) => { bytes.put_u8(Op::SetLocalU32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::U64, v) => { bytes.put_u8(Op::SetLocalU64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::I8, v) => { bytes.put_u8(Op::SetLocalI8.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::I16, v) => { bytes.put_u8(Op::SetLocalI16.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::I32, v) => { bytes.put_u8(Op::SetLocalI32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::I64, v) => { bytes.put_u8(Op::SetLocalI64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::F32, v) => { bytes.put_u8(Op::SetLocalF32.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::F64, v) => { bytes.put_u8(Op::SetLocalF64.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::UPtr, v) => { bytes.put_u8(Op::SetLocalUptr.into_u8()); bytes.put_u32(*v); },
-            Instruction::SetLocal(Type::IPtr, v) => { bytes.put_u8(Op::SetLocalIptr.into_u8()); bytes.put_u32(*v); },
+            Instruction::SetLocal(Type::U8, v) => {
+                bytes.put_u8(Op::SetLocalU8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::U16, v) => {
+                bytes.put_u8(Op::SetLocalU16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::U32, v) => {
+                bytes.put_u8(Op::SetLocalU32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::U64, v) => {
+                bytes.put_u8(Op::SetLocalU64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::I8, v) => {
+                bytes.put_u8(Op::SetLocalI8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::I16, v) => {
+                bytes.put_u8(Op::SetLocalI16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::I32, v) => {
+                bytes.put_u8(Op::SetLocalI32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::I64, v) => {
+                bytes.put_u8(Op::SetLocalI64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::F32, v) => {
+                bytes.put_u8(Op::SetLocalF32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::F64, v) => {
+                bytes.put_u8(Op::SetLocalF64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::UPtr, v) => {
+                bytes.put_u8(Op::SetLocalUptr.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::SetLocal(Type::IPtr, v) => {
+                bytes.put_u8(Op::SetLocalIptr.into_u8());
+                bytes.put_u32(*v);
+            }
 
-            Instruction::GetLocal(Type::U8, v) => { bytes.put_u8(Op::GetLocalU8.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::U16, v) => { bytes.put_u8(Op::GetLocalU16.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::U32, v) => { bytes.put_u8(Op::GetLocalU32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::U64, v) => { bytes.put_u8(Op::GetLocalU64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::I8, v) => { bytes.put_u8(Op::GetLocalI8.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::I16, v) => { bytes.put_u8(Op::GetLocalI16.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::I32, v) => { bytes.put_u8(Op::GetLocalI32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::I64, v) => { bytes.put_u8(Op::GetLocalI64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::F32, v) => { bytes.put_u8(Op::GetLocalF32.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::F64, v) => { bytes.put_u8(Op::GetLocalF64.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::UPtr, v) => { bytes.put_u8(Op::GetLocalUptr.into_u8()); bytes.put_u32(*v); },
-            Instruction::GetLocal(Type::IPtr, v) => { bytes.put_u8(Op::GetLocalIptr.into_u8()); bytes.put_u32(*v); },
+            Instruction::GetLocal(Type::U8, v) => {
+                bytes.put_u8(Op::GetLocalU8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::U16, v) => {
+                bytes.put_u8(Op::GetLocalU16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::U32, v) => {
+                bytes.put_u8(Op::GetLocalU32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::U64, v) => {
+                bytes.put_u8(Op::GetLocalU64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::I8, v) => {
+                bytes.put_u8(Op::GetLocalI8.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::I16, v) => {
+                bytes.put_u8(Op::GetLocalI16.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::I32, v) => {
+                bytes.put_u8(Op::GetLocalI32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::I64, v) => {
+                bytes.put_u8(Op::GetLocalI64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::F32, v) => {
+                bytes.put_u8(Op::GetLocalF32.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::F64, v) => {
+                bytes.put_u8(Op::GetLocalF64.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::UPtr, v) => {
+                bytes.put_u8(Op::GetLocalUptr.into_u8());
+                bytes.put_u32(*v);
+            }
+            Instruction::GetLocal(Type::IPtr, v) => {
+                bytes.put_u8(Op::GetLocalIptr.into_u8());
+                bytes.put_u32(*v);
+            }
 
             Instruction::Add => bytes.put_u8(Op::Add.into_u8()),
             Instruction::Sub => bytes.put_u8(Op::Sub.into_u8()),
@@ -297,51 +471,140 @@ impl BinaryEncodable for Instruction {
             Instruction::Cast(Type::F64, Type::F32) => bytes.put_u8(Op::CastF64_F32.into_u8()),
             Instruction::Cast(Type::IPtr, Type::UPtr) => bytes.put_u8(Op::CastChangeSign.into_u8()),
             Instruction::Cast(Type::UPtr, Type::IPtr) => bytes.put_u8(Op::CastChangeSign.into_u8()),
-            Instruction::Cast(a, b) if a == b => { /* just don't encode anything */ },
-            Instruction::Cast(a, b) => { bytes.put_u8(Op::CastArbitrary.into_u8()); bytes.put_u8((a.into_u8() << 4) | b.into_u8()); }
+            Instruction::Cast(a, b) if a == b => { /* just don't encode anything */ }
+            Instruction::Cast(a, b) => {
+                bytes.put_u8(Op::CastArbitrary.into_u8());
+                bytes.put_u8((a.into_u8() << 4) | b.into_u8());
+            }
             Instruction::CastChangeSign => bytes.put_u8(Op::CastChangeSign.into_u8()),
 
             Instruction::Return => bytes.put_u8(Op::Return.into_u8()),
-            Instruction::Call(f) => { bytes.put_u8(Op::Call.into_u8()); bytes.put_u32(*f); }
+            Instruction::Call(f) => {
+                bytes.put_u8(Op::Call.into_u8());
+                bytes.put_u32(*f);
+            }
             Instruction::CallDynamic => bytes.put_u8(Op::CallDynamic.into_u8()),
-            Instruction::GetFnUPtr(f) => { bytes.put_u8(Op::GetFnUPtr.into_u8()); bytes.put_u32(*f); }
+            Instruction::GetFnUPtr(f) => {
+                bytes.put_u8(Op::GetFnUPtr.into_u8());
+                bytes.put_u32(*f);
+            }
             Instruction::If(block) => Self::encode_if(bytes, block),
-            Instruction::IfElse(if_true, if_false) => Self::encode_if_else(bytes, if_true, if_false),
+            Instruction::IfElse(if_true, if_false) => {
+                Self::encode_if_else(bytes, if_true, if_false)
+            }
             Instruction::Loop(block) => Self::encode_loop(bytes, block),
             Instruction::Break(0) => bytes.put_u8(Op::Break.into_u8()),
-            Instruction::Break(depth) => { bytes.put_u8(Op::BreakArbitrary.into_u8()); bytes.put_u8(*depth); }
+            Instruction::Break(depth) => {
+                bytes.put_u8(Op::BreakArbitrary.into_u8());
+                bytes.put_u8(*depth);
+            }
             Instruction::Continue(0) => bytes.put_u8(Op::Continue.into_u8()),
-            Instruction::Continue(depth) => { bytes.put_u8(Op::ContinueArbitrary.into_u8()); bytes.put_u8(*depth); }
+            Instruction::Continue(depth) => {
+                bytes.put_u8(Op::ContinueArbitrary.into_u8());
+                bytes.put_u8(*depth);
+            }
 
             Instruction::Alloc => bytes.put_u8(Op::Alloc.into_u8()),
             Instruction::Realloc => bytes.put_u8(Op::Realloc.into_u8()),
             Instruction::Free => bytes.put_u8(Op::Free.into_u8()),
 
-            Instruction::Load(Type::U8, v) => { bytes.put_u8(Op::LoadU8.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::U16, v) => { bytes.put_u8(Op::LoadU16.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::U32, v) => { bytes.put_u8(Op::LoadU32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::U64, v) => { bytes.put_u8(Op::LoadU64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::I8, v) => { bytes.put_u8(Op::LoadI8.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::I16, v) => { bytes.put_u8(Op::LoadI16.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::I32, v) => { bytes.put_u8(Op::LoadI32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::I64, v) => { bytes.put_u8(Op::LoadI64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::F32, v) => { bytes.put_u8(Op::LoadF32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::F64, v) => { bytes.put_u8(Op::LoadF64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::UPtr, v) => { bytes.put_u8(Op::LoadUptr.into_u8()); bytes.put_i16(*v); },
-            Instruction::Load(Type::IPtr, v) => { bytes.put_u8(Op::LoadIptr.into_u8()); bytes.put_i16(*v); },
+            Instruction::Load(Type::U8, v) => {
+                bytes.put_u8(Op::LoadU8.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::U16, v) => {
+                bytes.put_u8(Op::LoadU16.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::U32, v) => {
+                bytes.put_u8(Op::LoadU32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::U64, v) => {
+                bytes.put_u8(Op::LoadU64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::I8, v) => {
+                bytes.put_u8(Op::LoadI8.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::I16, v) => {
+                bytes.put_u8(Op::LoadI16.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::I32, v) => {
+                bytes.put_u8(Op::LoadI32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::I64, v) => {
+                bytes.put_u8(Op::LoadI64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::F32, v) => {
+                bytes.put_u8(Op::LoadF32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::F64, v) => {
+                bytes.put_u8(Op::LoadF64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::UPtr, v) => {
+                bytes.put_u8(Op::LoadUptr.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Load(Type::IPtr, v) => {
+                bytes.put_u8(Op::LoadIptr.into_u8());
+                bytes.put_i16(*v);
+            }
 
-            Instruction::Store(Type::U8, v) => { bytes.put_u8(Op::StoreU8.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::U16, v) => { bytes.put_u8(Op::StoreU16.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::U32, v) => { bytes.put_u8(Op::StoreU32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::U64, v) => { bytes.put_u8(Op::StoreU64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::I8, v) => { bytes.put_u8(Op::StoreI8.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::I16, v) => { bytes.put_u8(Op::StoreI16.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::I32, v) => { bytes.put_u8(Op::StoreI32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::I64, v) => { bytes.put_u8(Op::StoreI64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::F32, v) => { bytes.put_u8(Op::StoreF32.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::F64, v) => { bytes.put_u8(Op::StoreF64.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::UPtr, v) => { bytes.put_u8(Op::StoreUptr.into_u8()); bytes.put_i16(*v); },
-            Instruction::Store(Type::IPtr, v) => { bytes.put_u8(Op::StoreIptr.into_u8()); bytes.put_i16(*v); },
+            Instruction::Store(Type::U8, v) => {
+                bytes.put_u8(Op::StoreU8.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::U16, v) => {
+                bytes.put_u8(Op::StoreU16.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::U32, v) => {
+                bytes.put_u8(Op::StoreU32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::U64, v) => {
+                bytes.put_u8(Op::StoreU64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::I8, v) => {
+                bytes.put_u8(Op::StoreI8.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::I16, v) => {
+                bytes.put_u8(Op::StoreI16.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::I32, v) => {
+                bytes.put_u8(Op::StoreI32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::I64, v) => {
+                bytes.put_u8(Op::StoreI64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::F32, v) => {
+                bytes.put_u8(Op::StoreF32.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::F64, v) => {
+                bytes.put_u8(Op::StoreF64.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::UPtr, v) => {
+                bytes.put_u8(Op::StoreUptr.into_u8());
+                bytes.put_i16(*v);
+            }
+            Instruction::Store(Type::IPtr, v) => {
+                bytes.put_u8(Op::StoreIptr.into_u8());
+                bytes.put_i16(*v);
+            }
 
             Instruction::Discard => bytes.put_u8(Op::Discard.into_u8()),
             Instruction::Duplicate => bytes.put_u8(Op::Duplicate.into_u8()),
@@ -357,7 +620,10 @@ impl BinaryEncodable for Instruction {
         }
     }
 
-    fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError> where Self: Sized {
+    fn decode(bytes: &mut Bytes) -> Result<Self, DecodeError>
+    where
+        Self: Sized,
+    {
         let op = Op::from_u8(bytes.get_u8());
         Ok(match op {
             Op::Nop => Self::Nop,
@@ -508,33 +774,51 @@ impl BinaryEncodable for Instruction {
 impl Instruction {
     fn read_instruction_block(bytes: &mut Bytes) -> Result<Block, DecodeError> {
         let mut instructions = vec![];
-        let locals = (0..bytes.get_u16()).map(|_| Type::from_u8(bytes.get_u8())).collect_vec();
+        let locals = (0..bytes.get_u16())
+            .map(|_| Type::from_u8(bytes.get_u8()))
+            .collect_vec();
 
         loop {
             match Instruction::decode(bytes) {
                 Ok(instruction) => instructions.push(instruction),
                 Err(DecodeError::BlockEnd(Op::End)) => break,
-                Err(e) => return Err(e)
+                Err(e) => return Err(e),
             }
         }
 
-        Ok(Block { locals, ops: instructions })
+        Ok(Block {
+            locals,
+            ops: instructions,
+        })
     }
 
     fn read_instruction_if_block(bytes: &mut Bytes) -> Result<Instruction, DecodeError> {
         let mut instructions = vec![];
-        let locals = (0..bytes.get_u16()).map(|_| Type::from_u8(bytes.get_u8())).collect_vec();
+        let locals = (0..bytes.get_u16())
+            .map(|_| Type::from_u8(bytes.get_u8()))
+            .collect_vec();
 
         loop {
             match Instruction::decode(bytes) {
                 Ok(instruction) => instructions.push(instruction),
                 Err(DecodeError::BlockEnd(Op::End)) => break,
-                Err(DecodeError::BlockEnd(Op::Else)) => return Ok(Self::IfElse(Block { locals, ops: instructions }, Self::read_instruction_block(bytes)?)),
-                Err(e) => return Err(e)
+                Err(DecodeError::BlockEnd(Op::Else)) => {
+                    return Ok(Self::IfElse(
+                        Block {
+                            locals,
+                            ops: instructions,
+                        },
+                        Self::read_instruction_block(bytes)?,
+                    ))
+                }
+                Err(e) => return Err(e),
             }
         }
 
-        Ok(Self::If(Block { locals, ops: instructions }))
+        Ok(Self::If(Block {
+            locals,
+            ops: instructions,
+        }))
     }
 
     fn encode_if(bytes: &mut BytesMut, block: &Block) {
@@ -662,14 +946,17 @@ impl Debug for Instruction {
             Instruction::Call(g) => write!(f, "Call({:?})", g),
             Instruction::CallDynamic => f.write_str("CallDynamic"),
             Instruction::GetFnUPtr(g) => write!(f, "GetFnUptr({:?})", g),
-            Instruction::If(instructions) => f.debug_struct("If")
+            Instruction::If(instructions) => f
+                .debug_struct("If")
                 .field("instructions", instructions)
                 .finish(),
-            Instruction::IfElse(if_true, if_false) => f.debug_struct("IfElse")
+            Instruction::IfElse(if_true, if_false) => f
+                .debug_struct("IfElse")
                 .field("if_true", if_true)
                 .field("if_false", if_false)
                 .finish(),
-            Instruction::Loop(instructions) => f.debug_struct("Loop")
+            Instruction::Loop(instructions) => f
+                .debug_struct("Loop")
                 .field("instructions", instructions)
                 .finish(),
             Instruction::Break(depth) => write!(f, "Break(%{:?})", depth),

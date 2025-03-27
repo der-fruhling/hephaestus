@@ -1,20 +1,20 @@
 document = { SOI ~ header ~ (NEWLINE+ ~ declaration ~ (NEWLINE+ ~ declaration)*)? ~ NEWLINE* ~ EOI }
 
-header = { "%hephaestus" ~ version }
+header  =  { "%hephaestus" ~ version }
 version = @{ number ~ "." ~ number ~ "." ~ number }
 
 declaration = _{
-    global_attribute |
-    global |
-    function |
-    import_module |
-    struct_definition |
-    enum_definition
+    global_attribute
+  | global
+  | function
+  | import_module
+  | struct_definition
+  | enum_definition
 }
 
-name = ${ "@" ~ (special_number | text) }
+name       = ${ "@" ~ (special_number | text) }
 local_name = ${ "$" ~ (special_number | text) }
-text = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
+text       = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
 
 global = {
     (attribute ~ NEWLINE+)* ~ linkage ~ KW_GLOBL ~ MUTABLE? ~ name ~ ":" ~ complex_type ~ ("=" ~ block)?
@@ -74,143 +74,143 @@ attribute = _{
 attribute_path = @{ text ~ ("::" ~ text)* }
 
 parameters = { local_var ~ ("," ~ NEWLINE* ~ local_var)* }
-local_var = { local_name ~ ":" ~ complex_type }
+local_var  = { local_name ~ ":" ~ complex_type }
 
 block = {
     "{" ~ NEWLINE+ ~ (block_locals | block_named_locals)? ~ (instruction ~ NEWLINE+)* ~ "}"
 }
 
 block_named_locals = _{ ("local" ~ local_var ~ ";" ~ NEWLINE+)* }
-block_locals = _{ "locals" ~ "[" ~ local_list? ~ "]" ~ NEWLINE+ }
+block_locals       = _{ "locals" ~ "[" ~ local_list? ~ "]" ~ NEWLINE+ }
 
 local_list = {
     ty ~ ("," ~ ty)*
 }
 
 instruction = {
-    OP_NOP |
-    (OP_CONST ~ int_ty ~ number) |
-    (OP_CONST ~ fp_ty ~ fp_number) |
-    (OP_GLOBAL_SET ~ ty ~ name) |
-    (OP_GLOBAL_GET ~ ty ~ name) |
-    (OP_GLOBAL_TEE ~ ty ~ name) |
-    (OP_LOCAL_SET ~ ty ~ local_name) |
-    (OP_LOCAL_GET ~ ty ~ local_name) |
-    (OP_LOCAL_TEE ~ ty ~ local_name) |
-    OP_ADD |
-    OP_SUB |
-    OP_MUL |
-    OP_DIV |
-    OP_REM |
-    OP_BOR |
-    OP_BAND |
-    OP_BXOR |
-    OP_INV |
-    (OP_CAST ~ ty ~ "->" ~ ty) |
-    OP_RETURN |
-    (OP_CALL ~ name) |
-    OP_CALL_DYNAMIC |
-    (OP_GET_FN_UPTR ~ name) |
-    (OP_IF ~ block ~ OP_ELSE ~ block) |
-    (OP_IF ~ block) |
-    (OP_LOOP ~ block) |
-    (OP_BREAK ~ special_number?) |
-    (OP_CONTINUE ~ special_number?) |
-    OP_MEM_ALLOC |
-    OP_MEM_REALLOC |
-    OP_MEM_FREE |
-    (OP_MEM_LOAD ~ ty ~ number?) |
-    (OP_MEM_STORE ~ ty ~ number?) |
-    (OP_DISCARD ~ number?) |
-    OP_TEST_GT |
-    OP_TEST_GEQ |
-    OP_TEST_LT |
-    OP_TEST_LEQ |
-    OP_TEST_EQ |
-    OP_TEST_NEQ |
-    (OP_DUP ~ number?)
+    OP_NOP
+  | (OP_CONST ~ int_ty ~ number)
+  | (OP_CONST ~ fp_ty ~ fp_number)
+  | (OP_GLOBAL_SET ~ ty ~ name)
+  | (OP_GLOBAL_GET ~ ty ~ name)
+  | (OP_GLOBAL_TEE ~ ty ~ name)
+  | (OP_LOCAL_SET ~ ty ~ local_name)
+  | (OP_LOCAL_GET ~ ty ~ local_name)
+  | (OP_LOCAL_TEE ~ ty ~ local_name)
+  | OP_ADD
+  | OP_SUB
+  | OP_MUL
+  | OP_DIV
+  | OP_REM
+  | OP_BOR
+  | OP_BAND
+  | OP_BXOR
+  | OP_INV
+  | (OP_CAST ~ ty ~ "->" ~ ty)
+  | OP_RETURN
+  | (OP_CALL ~ name)
+  | OP_CALL_DYNAMIC
+  | (OP_GET_FN_UPTR ~ name)
+  | (OP_IF ~ block ~ OP_ELSE ~ block)
+  | (OP_IF ~ block)
+  | (OP_LOOP ~ block)
+  | (OP_BREAK ~ special_number?)
+  | (OP_CONTINUE ~ special_number?)
+  | OP_MEM_ALLOC
+  | OP_MEM_REALLOC
+  | OP_MEM_FREE
+  | (OP_MEM_LOAD ~ ty ~ number?)
+  | (OP_MEM_STORE ~ ty ~ number?)
+  | (OP_DISCARD ~ number?)
+  | OP_TEST_GT
+  | OP_TEST_GEQ
+  | OP_TEST_LT
+  | OP_TEST_LEQ
+  | OP_TEST_EQ
+  | OP_TEST_NEQ
+  | (OP_DUP ~ number?)
 }
 
 int_ty = @{ "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" }
-fp_ty = @{ "f32" | "f64" }
-ty = @{ int_ty | fp_ty | "u_ptr" | "i_ptr" }
+fp_ty  = @{ "f32" | "f64" }
+ty     = @{ int_ty | fp_ty | "u_ptr" | "i_ptr" }
 
 complex_type = _{ ty | ref_type | enum_type }
-ref_type = { KW_REF ~ name }
-enum_type = { KW_ENUM ~ name }
+ref_type     =  { KW_REF ~ name }
+enum_type    =  { KW_ENUM ~ name }
 
 special_number = @{ "%" ~ number }
 
-number = ${ ("-" | "+")? ~ (ASCII_DIGIT+ | hex ~ ASCII_HEX_DIGIT+) }
+number    = ${ ("-" | "+")? ~ (ASCII_DIGIT+ | hex ~ ASCII_HEX_DIGIT+) }
 fp_number = ${ (ASCII_DIGIT+ | ASCII_DIGIT* ~ "." ~ ASCII_DIGIT+) }
 
 hex = { "0x" }
 
-OP_NOP = { "nop" }
-OP_CONST = { "const" }
-OP_GLOBAL_SET = { "global.set" }
-OP_GLOBAL_GET = { "global.get" }
-OP_GLOBAL_TEE = { "global.tee" }
-OP_LOCAL_SET = { "local.set" }
-OP_LOCAL_GET = { "local.get" }
-OP_LOCAL_TEE = { "local.tee" }
-OP_ADD = { "add" }
-OP_SUB = { "sub" }
-OP_MUL = { "mul" }
-OP_DIV = { "div" }
-OP_REM = { "rem" }
-OP_BOR = { "bor" }
-OP_BAND = { "band" }
-OP_BXOR = { "bxor" }
-OP_INV = { "inv" | "not" }
-OP_CAST = { "cast" }
-OP_RETURN = { "return" }
-OP_CALL = { "call" }
+OP_NOP          = { "nop" }
+OP_CONST        = { "const" }
+OP_GLOBAL_SET   = { "global.set" }
+OP_GLOBAL_GET   = { "global.get" }
+OP_GLOBAL_TEE   = { "global.tee" }
+OP_LOCAL_SET    = { "local.set" }
+OP_LOCAL_GET    = { "local.get" }
+OP_LOCAL_TEE    = { "local.tee" }
+OP_ADD          = { "add" }
+OP_SUB          = { "sub" }
+OP_MUL          = { "mul" }
+OP_DIV          = { "div" }
+OP_REM          = { "rem" }
+OP_BOR          = { "bor" }
+OP_BAND         = { "band" }
+OP_BXOR         = { "bxor" }
+OP_INV          = { "inv" | "not" }
+OP_CAST         = { "cast" }
+OP_RETURN       = { "return" }
+OP_CALL         = { "call" }
 OP_CALL_DYNAMIC = { "call.dynamic" | "call.dyn" }
-OP_GET_FN_UPTR = { "fnptr" }
-OP_IF = { "if" }
-OP_ELSE = { "else" }
-OP_LOOP = { "loop" }
-OP_BREAK = { "break" }
-OP_CONTINUE = { "continue" }
-OP_MEM_ALLOC = { "mem.alloc" }
-OP_MEM_REALLOC = { "mem.realloc" }
-OP_MEM_FREE = { "mem.free" }
-OP_MEM_LOAD = { "mem.load" | "mem.ld" }
-OP_MEM_STORE = { "mem.store" | "mem.st" }
-OP_DISCARD = { "discard" }
-OP_CMP = { "cmp" }
-OP_TEST_GT = { "test.gt" }
-OP_TEST_GEQ = { "test.geq" | "test.gte" }
-OP_TEST_LT = { "test.lt" }
-OP_TEST_LEQ = { "test.leq" | "test.lte" }
-OP_TEST_EQ = { "test.eq" }
-OP_TEST_NEQ = { "test.neq" }
-OP_DUP = { "dup" }
+OP_GET_FN_UPTR  = { "fnptr" }
+OP_IF           = { "if" }
+OP_ELSE         = { "else" }
+OP_LOOP         = { "loop" }
+OP_BREAK        = { "break" }
+OP_CONTINUE     = { "continue" }
+OP_MEM_ALLOC    = { "mem.alloc" }
+OP_MEM_REALLOC  = { "mem.realloc" }
+OP_MEM_FREE     = { "mem.free" }
+OP_MEM_LOAD     = { "mem.load" | "mem.ld" }
+OP_MEM_STORE    = { "mem.store" | "mem.st" }
+OP_DISCARD      = { "discard" }
+OP_CMP          = { "cmp" }
+OP_TEST_GT      = { "test.gt" }
+OP_TEST_GEQ     = { "test.geq" | "test.gte" }
+OP_TEST_LT      = { "test.lt" }
+OP_TEST_LEQ     = { "test.leq" | "test.lte" }
+OP_TEST_EQ      = { "test.eq" }
+OP_TEST_NEQ     = { "test.neq" }
+OP_DUP          = { "dup" }
 
-KW_EXPORT = { "export" }
-KW_INTERNAL = { "internal" }
-KW_ACCESSIBLE = { "accessible" }
-KW_NO_ACCESSIBLE = { "noaccessible" }
-KW_DOCUMENT = { "document" }
-KW_NO_DOCUMENT = { "nodocument" }
-KW_IMPORT = _{ "import" }
-KW_FROM = _{ "from" }
-KW_FUNCT = _{ "funct" }
-KW_GLOBL = _{ "globl" }
-KW_STATIC = _{ "static" }
-KW_DYNAMIC = _{ "dynamic" }
-KW_COMPONENT = _{ "component" }
-KW_WORLD = _{ "world" }
-KW_AS = _{ "as" }
-KW_INLINE = { "inline" }
-KW_INLINE_ALWAYS = { "inline" ~ "(" ~ "always" ~ ")" }
-KW_STRUCT = _{ "struct" }
-KW_ENUM = _{ "enum" }
-KW_REF = _{ "ref" }
+KW_EXPORT        =  { "export" }
+KW_INTERNAL      =  { "internal" }
+KW_ACCESSIBLE    =  { "accessible" }
+KW_NO_ACCESSIBLE =  { "noaccessible" }
+KW_DOCUMENT      =  { "document" }
+KW_NO_DOCUMENT   =  { "nodocument" }
+KW_IMPORT        = _{ "import" }
+KW_FROM          = _{ "from" }
+KW_FUNCT         = _{ "funct" }
+KW_GLOBL         = _{ "globl" }
+KW_STATIC        = _{ "static" }
+KW_DYNAMIC       = _{ "dynamic" }
+KW_COMPONENT     = _{ "component" }
+KW_WORLD         = _{ "world" }
+KW_AS            = _{ "as" }
+KW_INLINE        =  { "inline" }
+KW_INLINE_ALWAYS =  { "inline" ~ "(" ~ "always" ~ ")" }
+KW_STRUCT        = _{ "struct" }
+KW_ENUM          = _{ "enum" }
+KW_REF           = _{ "ref" }
 
-VOID = { "void" }
+VOID    = { "void" }
 MUTABLE = { "mutable" }
 
 WHITESPACE = _{ " " }
-COMMENT = _{ (("#" ~ (!NEWLINE ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/"))+ }
+COMMENT    = _{ (("#" ~ (!NEWLINE ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/"))+ }
