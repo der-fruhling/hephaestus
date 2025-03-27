@@ -75,6 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             MetadataContentKind::Bytes => Box::new(hex::encode(&custom_feature.content)),
             #[cfg(feature = "cbor-features")]
             MetadataContentKind::CBOR => {
+                use itertools::Itertools;
                 use rustc_serialize::json::{Json, ToJson};
 
                 let mut dec = cbor::Decoder::from_bytes(custom_feature.content.clone());
@@ -255,6 +256,10 @@ fn pretty_print_linkage_as_attributes(
     if linkage.contains(LinkageFlags::IMPORTED) {
         let Some(src) = source else { unreachable!() };
         write!(out, "from @%{} / {} import ", src.module, src.item)?;
+    }
+
+    if linkage.contains(LinkageFlags::EXPECTED) {
+        write!(out, "expect ")?;
     }
 
     Ok(())

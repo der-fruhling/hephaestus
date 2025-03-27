@@ -24,7 +24,7 @@ function = {
     (attribute ~ NEWLINE+)* ~ linkage ~ KW_FUNCT ~ name ~ "(" ~ parameters? ~ ")" ~ "->" ~ (complex_type | VOID) ~ (NEWLINE* ~ block)?
 }
 
-linkage = { ((KW_EXPORT ~ export_mods?) | (KW_INTERNAL ~ (KW_INLINE_ALWAYS | KW_INLINE)?))? ~ (KW_FROM ~ name ~ "/" ~ symbol_name ~ KW_IMPORT)? }
+linkage = { ((KW_EXPORT ~ export_mods?) | (KW_INTERNAL ~ (KW_INLINE_ALWAYS | KW_INLINE)?))? ~ ((KW_FROM ~ name ~ "/" ~ symbol_name ~ KW_IMPORT) | KW_EXPECT)? }
 
 type_linkage = { ((KW_EXPORT ~ export_mods?) | KW_INTERNAL)? ~ (KW_FROM ~ name ~ "/" ~ symbol_name ~ KW_IMPORT)? }
 
@@ -189,6 +189,7 @@ OP_TEST_NEQ     = { "test.neq" }
 OP_DUP          = { "dup" }
 
 KW_EXPORT        =  { "export" }
+KW_EXPECT        =  { "expect" }
 KW_INTERNAL      =  { "internal" }
 KW_ACCESSIBLE    =  { "accessible" }
 KW_NO_ACCESSIBLE =  { "noaccessible" }

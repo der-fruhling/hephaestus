@@ -356,8 +356,23 @@ impl Target {
 bitflags! {
     #[derive(Debug, Clone, Copy, Default)]
     pub struct ModuleFlags: u32 {
+        /// Declares that this module contains [Metadata] entries. Only used
+        /// for encoding and decoding, this flag is automatically set.
         const HAS_CUSTOM_FEATURES = 1 << 0;
+
+        /// Declares that this module contains a WIT component that must be
+        /// loaded for the module to be coherent. This is present to allow
+        /// tools to initialize any WebAssembly decoders and to provide an
+        /// easy out to declare the module invalid if the tool does not
+        /// support these components.
         const SUPPORTS_WIT_COMPONENTS = 1 << 1;
+
+        /// Declares that the module contains items with
+        /// [LinkageFlags::EXPECTED] linkage. A module with this flag will
+        /// fail to transpile to actual target code unless that target
+        /// supports partial modules (e.g. it's being compiled to an object
+        /// file, or the partial-supporting WebAssembly targets are being used)
+        const PARTIAL = 1 << 2;
     }
 }
 
@@ -528,6 +543,19 @@ bitflags! {
 
         const FORCE_INLINE = 1 << 7;
         const INLINE = 1 << 8;
+
+        /// Provides a hard dependency for this item, expecting that a linker
+        /// will provide an implementation. Using this option requires that
+        /// [ModuleFlags::PARTIAL] is also set.
+        const EXPECTED = 1 << 9;
+    }
+}
+
+impl LinkageFlags {
+    pub fn should_be_named(&self) -> bool {
+        self.contains(Self::EXPORTED)
+            | self.contains(Self::IMPORTED)
+            | self.contains(Self::EXPECTED)
     }
 }
 
@@ -768,7 +796,7 @@ impl BinaryEncodable for Global {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        if linkage.should_be_named() {
             let name = self.name.as_ref().unwrap();
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
@@ -804,9 +832,7 @@ impl BinaryEncodable for Global {
             None
         };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED)
-            || linkage.contains(LinkageFlags::IMPORTED)
-        {
+        let name = if linkage.should_be_named() {
             let name_len = bytes.get_u16() as usize;
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
@@ -872,7 +898,7 @@ impl BinaryEncodable for Function {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        if linkage.should_be_named() {
             let name = self.name.as_ref().unwrap();
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
@@ -921,9 +947,7 @@ impl BinaryEncodable for Function {
             None
         };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED)
-            || linkage.contains(LinkageFlags::IMPORTED)
-        {
+        let name = if linkage.should_be_named() {
             let name_len = bytes.get_u16() as usize;
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
@@ -1126,7 +1150,7 @@ impl BinaryEncodable for Struct {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        if linkage.should_be_named() {
             let name = self.name.as_ref().unwrap();
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
@@ -1154,9 +1178,7 @@ impl BinaryEncodable for Struct {
             None
         };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED)
-            || linkage.contains(LinkageFlags::IMPORTED)
-        {
+        let name = if linkage.should_be_named() {
             let name_len = bytes.get_u16() as usize;
             let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
             Some(name)
@@ -1201,7 +1223,7 @@ impl BinaryEncodable for Enum {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.contains(LinkageFlags::EXPORTED) || linkage.contains(LinkageFlags::IMPORTED) {
+        if linkage.should_be_named() {
             let name = self.name.as_ref().unwrap();
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
@@ -1233,9 +1255,7 @@ impl BinaryEncodable for Enum {
             None
         };
 
-        let name = if linkage.contains(LinkageFlags::EXPORTED)
-            || linkage.contains(LinkageFlags::IMPORTED)
-        {
+        let name = if linkage.should_be_named() {
             let name_len = bytes.get_u16() as usize;
             let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
             Some(name)

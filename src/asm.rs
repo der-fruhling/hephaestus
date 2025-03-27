@@ -246,6 +246,7 @@ pub enum Linkage {
     Export(LinkageFlags),
     Import(Box<Linkage>, u32, String),
     Internal(InlinePref),
+    Expected(Box<Linkage>),
 }
 
 impl Linkage {
@@ -263,6 +264,7 @@ impl Linkage {
                 InlinePref::Prefer => (LinkageFlags::INTERNAL | LinkageFlags::INLINE, None),
                 InlinePref::Never => (LinkageFlags::INTERNAL, None),
             },
+            Linkage::Expected(linkage) => (LinkageFlags::EXPECTED | linkage.split().0, None),
         }
     }
 }
@@ -887,6 +889,8 @@ fn parse_linkage(parsed: &ParsedHeph, pair: Pair<'_, Rule>) -> Result<Linkage, A
                 linkage = Linkage::Import(Box::new(linkage), source_module, source_name.into());
             }
 
+            Rule::KW_EXPECT => linkage = Linkage::Expected(Box::new(linkage)),
+
             _ => {}
         }
     }
@@ -991,7 +995,8 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                     )
                 };
 
-                let has_import_linkage = matches!(linkage, Linkage::Import(_, _, _));
+                let has_import_linkage =
+                    matches!(linkage, Linkage::Import(_, _, _) | Linkage::Expected(_));
 
                 parsed.globals.insert(
                     name.as_str().into(),
@@ -1086,7 +1091,7 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                             let name = pairs.next().unwrap();
 
                             let wit = wit_component::decode_reader(
-                                File::open(component_name).map_err(|e| {
+                                std::fs::File::open(component_name).map_err(|e| {
                                     AsmError::new_for(
                                         &orig,
                                         format!("failed to open WIT component file: {e}"),
@@ -1122,7 +1127,7 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                                 name.as_str().into(),
                                 Global::ImportedModule(ImportedModule::WitComponent(
                                     world_name.into(),
-                                    Bytes::from(encoded),
+                                    bytes::Bytes::from(encoded),
                                 )),
                             );
                         }

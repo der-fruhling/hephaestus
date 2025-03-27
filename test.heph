@@ -37,10 +37,12 @@ export struct @test_pub_struct {
 from @libc / malloc import funct @malloc($len: u_ptr) -> u_ptr
 from @libc / free import funct @free($len: u_ptr) -> u_ptr
 
+expect funct @something() -> void
+
 export funct @memcpy($src: u_ptr, $tgt: u_ptr, $len: u64) -> u_ptr
 {
     local.get u64 $len
-    
+
     loop {
         dup
         const u64 0
