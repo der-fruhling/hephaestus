@@ -1,5 +1,6 @@
 pub mod asm;
-mod instruction;
+pub mod instruction;
+pub mod linker;
 
 use bitflags::bitflags;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -8,6 +9,7 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use ordered_hash_map::OrderedHashMap;
 use std::collections::BTreeMap;
+use std::iter;
 use std::str::FromStr;
 use std::string::FromUtf8Error;
 use std::{
@@ -17,13 +19,13 @@ use std::{
 };
 use thiserror::Error;
 
-#[derive(Default, Debug)]
-pub struct Module {
+#[derive(Default, Debug, Clone)]
+pub struct Module<Global = u32> {
     pub version: u16,
     pub flags: ModuleFlags,
     pub target: Target,
     pub metadata: Vec<MetadataDeclaration>,
-    globals: Vec<Item>,
+    globals: Vec<Item<Global>>,
     imported_modules: HashMap<String, usize>,
     functions: HashMap<String, usize>,
     global_vars: HashMap<String, usize>,
@@ -31,7 +33,53 @@ pub struct Module {
     enums: HashMap<String, usize>,
 }
 
-#[derive(Debug)]
+impl<Global> Module<Global> {
+    pub fn new() -> Self
+    where
+        Global: Default,
+    {
+        Self {
+            version: CURRENT_VERSION,
+            ..Default::default()
+        }
+    }
+
+    pub fn add_item(&mut self, item: Item<Global>) -> u32 {
+        let idx = self.globals.len() as u32;
+        self.globals.push(item);
+        idx
+    }
+
+    pub fn map_globals<T: Default>(self, f: impl Fn(Global) -> T + Copy) -> Module<T> {
+        let Module {
+            version,
+            flags,
+            target,
+            metadata,
+            globals,
+            ..
+        } = self;
+
+        let mut m = Module::<T> {
+            version,
+            flags,
+            target,
+            metadata,
+            globals: globals.into_iter().map(|i| i.map_globals::<T>(f)).collect(),
+            ..Default::default()
+        };
+
+        m.recalculate();
+
+        m
+    }
+
+    pub fn globals(&self) -> impl IntoIterator<Item = &Global> {
+        self.globals.iter().flat_map(|v| v.needed_globals())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataDeclaration {
     pub name: String,
     pub kind: MetadataContentKind,
@@ -82,7 +130,7 @@ impl MetadataContentKind {
     }
 }
 
-impl Module {
+impl<Global> Module<Global> {
     pub(crate) fn recalculate(&mut self) {
         self.functions.clear();
         self.global_vars.clear();
@@ -122,6 +170,12 @@ impl Module {
         }
     }
 
+    pub fn all_globals(&self) -> impl Iterator<Item = &Item<Global>> {
+        self.globals.iter()
+    }
+}
+
+impl Module {
     pub fn as_bytes(&self) -> Bytes {
         let mut bytes = BytesMut::new();
         self.encode(&mut bytes);
@@ -143,13 +197,9 @@ impl Module {
             _other => None,
         })
     }
-
-    pub fn all_globals(&self) -> impl Iterator<Item = &Item> {
-        self.globals.iter()
-    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ImportedModule {
     /// Refers to a native library. Actual resolved path is system dependent.
     ///
@@ -557,6 +607,10 @@ impl LinkageFlags {
             | self.contains(Self::IMPORTED)
             | self.contains(Self::EXPECTED)
     }
+
+    pub fn should_cause_inclusion(&self) -> bool {
+        self.contains(Self::EXPORTED) | self.contains(Self::IMPORTED)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -706,21 +760,61 @@ impl Type {
     }
 }
 
-#[derive(Debug)]
-pub enum Item {
+#[derive(Debug, Clone)]
+pub enum Item<GlobalTy = u32> {
     ImportedModule(ImportedModule),
-    Global(Global),
-    Function(Function),
-    Struct(Struct),
-    Enum(Enum),
+    Global(Global<GlobalTy>),
+    Function(Function<GlobalTy>),
+    Struct(Struct<GlobalTy>),
+    Enum(Enum<GlobalTy>),
 }
 
-impl Item {
+impl<Global> Item<Global> {
     const GLOBAL: u8 = 1;
     const FUNCTION: u8 = 2;
     const IMPORTED_MODULE: u8 = 3;
     const STRUCT: u8 = 4;
     const ENUM: u8 = 5;
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Item::ImportedModule(_) => None,
+            Item::Global(global) => global.name.as_deref(),
+            Item::Function(function) => function.name.as_deref(),
+            Item::Struct(struct_ty) => struct_ty.name.as_deref(),
+            Item::Enum(enum_ty) => enum_ty.name.as_deref(),
+        }
+    }
+
+    pub fn linkage(&self) -> Option<LinkageFlags> {
+        match self {
+            Item::ImportedModule(_) => None,
+            Item::Global(global) => Some(global.linkage),
+            Item::Function(function) => Some(function.linkage),
+            Item::Struct(struct_ty) => Some(struct_ty.linkage),
+            Item::Enum(enum_ty) => Some(enum_ty.linkage),
+        }
+    }
+
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Item<T> {
+        match self {
+            Item::ImportedModule(imported_module) => Item::ImportedModule(imported_module),
+            Item::Global(global) => Item::Global(global.map_globals(f)),
+            Item::Function(function) => Item::Function(function.map_globals(f)),
+            Item::Struct(s) => Item::Struct(s.map_globals(f)),
+            Item::Enum(e) => Item::Enum(e.map_globals(f)),
+        }
+    }
+
+    pub fn needed_globals(&self) -> Vec<&Global> {
+        match self {
+            Item::ImportedModule(_) => vec![],
+            Item::Global(global) => global.needed_globals().into_iter().collect(),
+            Item::Function(function) => function.needed_globals().into_iter().collect(),
+            Item::Struct(s) => s.needed_globals().into_iter().collect(),
+            Item::Enum(e) => e.needed_globals().into_iter().collect(),
+        }
+    }
 }
 
 impl BinaryEncodable for Item {
@@ -765,19 +859,19 @@ impl BinaryEncodable for Item {
 }
 
 #[derive(Debug, Clone)]
-pub struct Source {
-    pub module: u32,
+pub struct Source<GlobalTy = u32> {
+    pub module: GlobalTy,
     pub item: String,
 }
 
-#[derive(Debug)]
-pub struct Global {
+#[derive(Debug, Clone)]
+pub struct Global<GlobalTy = u32> {
     pub name: Option<String>,
-    pub source: Option<Source>,
+    pub source: Option<Source<GlobalTy>>,
     pub linkage: LinkageFlags,
-    pub ty: ComplexType,
+    pub ty: ComplexType<GlobalTy>,
     pub mutable: bool,
-    pub initializer: Option<Block>,
+    pub initializer: Option<Block<GlobalTy>>,
 }
 
 impl BinaryEncodable for Global {
@@ -796,10 +890,11 @@ impl BinaryEncodable for Global {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.should_be_named() {
-            let name = self.name.as_ref().unwrap();
+        if let Some(name) = self.name.as_ref() {
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
+        } else {
+            bytes.put_u16(0);
         }
 
         if let Some(init) = self.initializer.as_ref() {
@@ -832,8 +927,8 @@ impl BinaryEncodable for Global {
             None
         };
 
-        let name = if linkage.should_be_named() {
-            let name_len = bytes.get_u16() as usize;
+        let name_len = bytes.get_u16() as usize;
+        let name = if name_len > 0 {
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
             None
@@ -875,14 +970,51 @@ impl BinaryEncodable for Global {
     }
 }
 
-#[derive(Debug)]
-pub struct Function {
+impl<GlobalTy> Global<GlobalTy> {
+    pub fn map_globals<T>(self, f: impl Fn(GlobalTy) -> T + Copy) -> Global<T> {
+        let Global {
+            name,
+            source,
+            linkage,
+            ty,
+            mutable,
+            initializer,
+        } = self;
+
+        Global::<T> {
+            name,
+            source: source.map(|s| Source {
+                module: f(s.module),
+                item: s.item,
+            }),
+            linkage,
+            ty: ty.map_globals(f),
+            mutable,
+            initializer: initializer.map(|b| b.map_globals(f)),
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &GlobalTy> {
+        [self.source.as_ref().map(|v| &v.module)]
+            .into_iter()
+            .flatten()
+            .chain(
+                self.initializer
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|v| v.ops.iter().filter_map(|v| v.referenced_global())),
+            )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function<Global = u32> {
     pub linkage: LinkageFlags,
     pub name: Option<String>,
-    pub source: Option<Source>,
-    pub return_type: Option<ComplexType>,
-    pub params: OrderedHashMap<String, ComplexType>,
-    pub block: Option<Block>,
+    pub source: Option<Source<Global>>,
+    pub return_type: Option<ComplexType<Global>>,
+    pub params: OrderedHashMap<String, ComplexType<Global>>,
+    pub block: Option<Block<Global>>,
 }
 
 impl BinaryEncodable for Function {
@@ -898,10 +1030,11 @@ impl BinaryEncodable for Function {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.should_be_named() {
-            let name = self.name.as_ref().unwrap();
+        if let Some(name) = self.name.as_ref() {
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
+        } else {
+            bytes.put_u16(0);
         }
 
         match &self.return_type {
@@ -947,8 +1080,8 @@ impl BinaryEncodable for Function {
             None
         };
 
-        let name = if linkage.should_be_named() {
-            let name_len = bytes.get_u16() as usize;
+        let name_len = bytes.get_u16() as usize;
+        let name = if name_len > 0 {
             Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
             None
@@ -1009,6 +1142,47 @@ impl BinaryEncodable for Function {
     }
 }
 
+impl<Global> Function<Global> {
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Function<T> {
+        let Function {
+            linkage,
+            name,
+            source,
+            return_type,
+            params,
+            block,
+        } = self;
+
+        Function::<T> {
+            linkage,
+            name,
+            source: source.map(|s| Source {
+                module: f(s.module),
+                item: s.item,
+            }),
+            return_type: return_type.map(|v| v.map_globals(&f)),
+            params: params
+                .into_iter()
+                .map(|(k, v)| (k, v.map_globals(&f)))
+                .collect(),
+            block: block.map(|b| b.map_globals(f)),
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &Global> {
+        [self.source.as_ref().map(|v| &v.module)]
+            .into_iter()
+            .flatten()
+            .chain(self.params.values().flat_map(|p| p.needed_globals()))
+            .chain(
+                self.block
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|v| v.ops.iter().filter_map(|v| v.referenced_global())),
+            )
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 #[repr(u8)]
 #[non_exhaustive]
@@ -1029,16 +1203,16 @@ impl StructLayout {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub enum ComplexType {
+pub enum ComplexType<Global = u32> {
     Primitive(Type),
 
     /// Internally considered a [u_ptr][Type::UPtr].
-    StructRef(u32),
+    StructRef(Global),
 
     /// Considered the same type as it's [backing type][Enum::backing_type].
-    Enum(Type, u32),
+    Enum(Type, Global),
 
-    AliasedType(Box<ComplexType>, u32),
+    AliasedType(Box<ComplexType<Global>>, Global),
 }
 
 impl Display for ComplexType {
@@ -1052,7 +1226,7 @@ impl Display for ComplexType {
     }
 }
 
-impl ComplexType {
+impl<Global> ComplexType<Global> {
     const STRUCT_REF: u8 = 0x3F;
     const ALIAS: u8 = 0x40;
     const ENUM: u8 = 0x80;
@@ -1066,6 +1240,31 @@ impl ComplexType {
         }
     }
 
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> ComplexType<T> {
+        match self {
+            ComplexType::Primitive(ty) => ComplexType::Primitive(ty),
+            ComplexType::StructRef(g) => ComplexType::StructRef(f(g)),
+            ComplexType::Enum(ty, g) => ComplexType::Enum(ty, f(g)),
+            ComplexType::AliasedType(complex_type, g) => {
+                ComplexType::AliasedType(Box::new(complex_type.map_globals(f)), f(g))
+            }
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &Global> {
+        match self {
+            ComplexType::Primitive(_) => vec![],
+            ComplexType::StructRef(g) => vec![g],
+            ComplexType::Enum(_, g) => vec![g],
+            ComplexType::AliasedType(complex_type, g) => [g]
+                .into_iter()
+                .chain(complex_type.needed_globals())
+                .collect_vec(),
+        }
+    }
+}
+
+impl ComplexType {
     fn read_complex_type(bytes: &mut Bytes, b: u8) -> ComplexType {
         if (b & Self::ENUM) > 0 {
             Self::Enum(Type::from_u8(b & 0xF), bytes.get_u32())
@@ -1127,13 +1326,13 @@ impl BinaryEncodable for ComplexType {
     }
 }
 
-#[derive(Debug)]
-pub struct Struct {
+#[derive(Debug, Clone)]
+pub struct Struct<GlobalTy = u32> {
     pub layout: StructLayout,
     pub linkage: LinkageFlags,
     pub name: Option<String>,
-    pub source: Option<Source>,
-    pub values: Vec<StructField>,
+    pub source: Option<Source<GlobalTy>>,
+    pub values: Vec<StructField<GlobalTy>>,
 }
 
 impl BinaryEncodable for Struct {
@@ -1150,10 +1349,11 @@ impl BinaryEncodable for Struct {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.should_be_named() {
-            let name = self.name.as_ref().unwrap();
+        if let Some(name) = self.name.as_ref() {
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
+        } else {
+            bytes.put_u16(0);
         }
 
         bytes.put_u16(self.values.len() as u16);
@@ -1178,10 +1378,9 @@ impl BinaryEncodable for Struct {
             None
         };
 
-        let name = if linkage.should_be_named() {
-            let name_len = bytes.get_u16() as usize;
-            let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
-            Some(name)
+        let name_len = bytes.get_u16() as usize;
+        let name = if name_len > 0 {
+            Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
             None
         };
@@ -1200,12 +1399,41 @@ impl BinaryEncodable for Struct {
     }
 }
 
-#[derive(Debug)]
-pub struct Enum {
+impl<Global> Struct<Global> {
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Struct<T> {
+        let Struct {
+            layout,
+            linkage,
+            name,
+            source,
+            values,
+        } = self;
+        Struct::<T> {
+            layout,
+            linkage,
+            name,
+            source: source.map(|s| Source {
+                module: f(s.module),
+                item: s.item,
+            }),
+            values: values.into_iter().map(|v| v.map_globals(f)).collect(),
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &Global> {
+        self.source
+            .iter()
+            .map(|v| &v.module)
+            .chain(self.values.iter().flat_map(|v| v.needed_globals()))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Enum<Global = u32> {
     pub backing_type: Type,
     pub linkage: LinkageFlags,
     pub name: Option<String>,
-    pub source: Option<Source>,
+    pub source: Option<Source<Global>>,
     pub values: OrderedHashMap<String, Const>,
 }
 
@@ -1223,10 +1451,11 @@ impl BinaryEncodable for Enum {
             bytes.put_slice(source.item.as_bytes());
         }
 
-        if linkage.should_be_named() {
-            let name = self.name.as_ref().unwrap();
+        if let Some(name) = self.name.as_ref() {
             bytes.put_u16(name.len() as u16);
             bytes.put_slice(name.as_bytes());
+        } else {
+            bytes.put_u16(0);
         }
 
         bytes.put_u16(self.values.len() as u16);
@@ -1255,10 +1484,9 @@ impl BinaryEncodable for Enum {
             None
         };
 
-        let name = if linkage.should_be_named() {
-            let name_len = bytes.get_u16() as usize;
-            let name = String::from_utf8(bytes.split_to(name_len).into()).unwrap();
-            Some(name)
+        let name_len = bytes.get_u16() as usize;
+        let name = if name_len > 0 {
+            Some(String::from_utf8_lossy(&bytes.split_to(name_len).to_vec()).into_owned())
         } else {
             None
         };
@@ -1283,7 +1511,34 @@ impl BinaryEncodable for Enum {
     }
 }
 
-#[derive(Debug)]
+impl<Global> Enum<Global> {
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Enum<T> {
+        let Enum {
+            backing_type,
+            linkage,
+            name,
+            source,
+            values,
+        } = self;
+
+        Enum::<T> {
+            backing_type,
+            linkage,
+            name,
+            source: source.map(|s| Source {
+                module: f(s.module),
+                item: s.item,
+            }),
+            values,
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &Global> {
+        self.source.as_ref().map(|v| &v.module)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum StructFieldLayout {
     Automatic,
     Align(u8),
@@ -1324,19 +1579,37 @@ impl BinaryEncodable for StructFieldLayout {
     }
 }
 
-#[derive(Debug)]
-pub enum StructField {
+#[derive(Debug, Clone)]
+pub enum StructField<Global = u32> {
     Data {
         layout: StructFieldLayout,
         name: String,
-        ty: ComplexType,
+        ty: ComplexType<Global>,
     },
     EmptySpace(u16),
 }
 
-impl StructField {
+impl<Global> StructField<Global> {
     const DATA: u8 = 0x00;
     const EMPTY_SPACE: u8 = 0x01;
+
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> StructField<T> {
+        match self {
+            StructField::Data { layout, name, ty } => StructField::Data {
+                layout,
+                name,
+                ty: ty.map_globals(f),
+            },
+            StructField::EmptySpace(i) => StructField::EmptySpace(i),
+        }
+    }
+
+    pub fn needed_globals(&self) -> impl IntoIterator<Item = &Global> {
+        match self {
+            StructField::Data { ty, .. } => ty.needed_globals().into_iter().collect_vec(),
+            StructField::EmptySpace(_) => vec![],
+        }
+    }
 }
 
 impl BinaryEncodable for StructField {
@@ -1377,9 +1650,19 @@ impl BinaryEncodable for StructField {
 }
 
 #[derive(Debug, Clone)]
-pub struct Block {
+pub struct Block<Global = u32> {
     pub locals: Vec<Type>,
-    pub ops: Vec<Instruction>,
+    pub ops: Vec<Instruction<Global>>,
+}
+
+impl<Global> Block<Global> {
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Block<T> {
+        let Block { locals, ops } = self;
+        Block::<T> {
+            locals,
+            ops: ops.into_iter().map(|v| v.map_globals(f)).collect(),
+        }
+    }
 }
 
 struct Locals<T: Display>(T);
@@ -1390,7 +1673,7 @@ impl<T: Display> Display for Locals<T> {
     }
 }
 
-impl Display for Block {
+impl<Global: Display> Display for Block<Global> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("{")?;
 

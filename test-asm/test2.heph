@@ -1,0 +1,8 @@
+%hephaestus 0.1.0
+
+expect funct @perform_test1() -> void
+
+internal funct @perform_test2() -> void {
+    call @perform_test1
+    return
+}

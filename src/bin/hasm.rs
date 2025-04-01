@@ -16,9 +16,12 @@ enum OutputMode {
 struct Cli {
     #[clap(long, default_value = "normal")]
     output_mode: OutputMode,
-
     #[clap(short, long = "output")]
     output_file: PathBuf,
+
+    #[clap(short = 'x', long)]
+    target: Option<Target>,
+
     input_file: PathBuf,
 }
 
@@ -40,6 +43,10 @@ fn main() -> ExitCode {
     }
 
     let mut module = asm.finish();
+
+    if let Some(target) = cli.target {
+        module.target = target;
+    }
 
     module.metadata.push(MetadataDeclaration {
         name: "producer".into(),

@@ -4,11 +4,11 @@ use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter, Write};
 
 #[derive(Clone)]
-pub enum Instruction {
+pub enum Instruction<Global = u32> {
     Nop,
     Const(Const),
-    SetGlobal(Type, u32),
-    GetGlobal(Type, u32),
+    SetGlobal(Type, Global),
+    GetGlobal(Type, Global),
     SetLocal(Type, u32),
     GetLocal(Type, u32),
     Add,
@@ -30,12 +30,12 @@ pub enum Instruction {
     Cast(Type, Type),
     CastChangeSign,
     Return,
-    Call(u32),
+    Call(Global),
     CallDynamic,
-    GetFnUPtr(u32),
-    If(Block),
-    IfElse(Block, Block),
-    Loop(Block),
+    GetFnUPtr(Global),
+    If(Block<Global>),
+    IfElse(Block<Global>, Block<Global>),
+    Loop(Block<Global>),
     Break(u8),
     Continue(u8),
     Alloc,
@@ -873,7 +873,7 @@ impl Instruction {
     }
 }
 
-impl Display for Instruction {
+impl<Global: Display> Display for Instruction<Global> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Instruction::Nop => f.write_str("nop"),
@@ -922,7 +922,7 @@ impl Display for Instruction {
     }
 }
 
-impl Debug for Instruction {
+impl<Global: Debug> Debug for Instruction<Global> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Instruction::Nop => f.write_str("Nop"),
@@ -975,6 +975,65 @@ impl Debug for Instruction {
             Instruction::TestLtEq => f.write_str("TestLtEq"),
             Instruction::TestEq => f.write_str("TestEq"),
             Instruction::TestNeq => f.write_str("TestNeq"),
+        }
+    }
+}
+
+impl<Global> Instruction<Global> {
+    pub fn map_globals<T>(self, f: impl Fn(Global) -> T + Copy) -> Instruction<T> {
+        match self {
+            Instruction::GetGlobal(ty, g) => Instruction::GetGlobal(ty, f(g)),
+            Instruction::SetGlobal(ty, g) => Instruction::SetGlobal(ty, f(g)),
+            Instruction::Call(g) => Instruction::Call(f(g)),
+            Instruction::GetFnUPtr(g) => Instruction::GetFnUPtr(f(g)),
+            Instruction::Nop => Instruction::Nop,
+            Instruction::Const(c) => Instruction::Const(c),
+            Instruction::SetLocal(ty, l) => Instruction::SetLocal(ty, l),
+            Instruction::GetLocal(ty, l) => Instruction::GetLocal(ty, l),
+            Instruction::Add => Instruction::Add,
+            Instruction::Sub => Instruction::Sub,
+            Instruction::Mul => Instruction::Mul,
+            Instruction::Div => Instruction::Div,
+            Instruction::Rem => Instruction::Rem,
+            Instruction::BitOr => Instruction::BitOr,
+            Instruction::BitAnd => Instruction::BitAnd,
+            Instruction::BitXor => Instruction::BitXor,
+            Instruction::Inv => Instruction::Inv,
+            Instruction::CmpOrd => Instruction::CmpOrd,
+            Instruction::TestGt => Instruction::TestGt,
+            Instruction::TestGtEq => Instruction::TestGtEq,
+            Instruction::TestLt => Instruction::TestLt,
+            Instruction::TestLtEq => Instruction::TestLtEq,
+            Instruction::TestEq => Instruction::TestEq,
+            Instruction::TestNeq => Instruction::TestNeq,
+            Instruction::Cast(a, b) => Instruction::Cast(a, b),
+            Instruction::CastChangeSign => Instruction::CastChangeSign,
+            Instruction::Return => Instruction::Return,
+            Instruction::CallDynamic => Instruction::CallDynamic,
+            Instruction::If(block) => Instruction::If(block.map_globals(f)),
+            Instruction::IfElse(if_true, if_false) => {
+                Instruction::IfElse(if_true.map_globals(f), if_false.map_globals(f))
+            }
+            Instruction::Loop(block) => Instruction::Loop(block.map_globals(f)),
+            Instruction::Break(depth) => Instruction::Break(depth),
+            Instruction::Continue(depth) => Instruction::Continue(depth),
+            Instruction::Alloc => Instruction::Alloc,
+            Instruction::Realloc => Instruction::Realloc,
+            Instruction::Free => Instruction::Free,
+            Instruction::Load(ty, off) => Instruction::Load(ty, off),
+            Instruction::Store(ty, off) => Instruction::Store(ty, off),
+            Instruction::Discard => Instruction::Discard,
+            Instruction::Duplicate => Instruction::Duplicate,
+        }
+    }
+
+    pub fn referenced_global(&self) -> Option<&Global> {
+        match self {
+            Instruction::GetGlobal(_, g) => Some(g),
+            Instruction::SetGlobal(_, g) => Some(g),
+            Instruction::Call(g) => Some(g),
+            Instruction::GetFnUPtr(g) => Some(g),
+            _ => None,
         }
     }
 }

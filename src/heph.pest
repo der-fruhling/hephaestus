@@ -14,7 +14,7 @@ declaration = _{
 
 name       = ${ "@" ~ (special_number | text) }
 local_name = ${ "$" ~ (special_number | text) }
-text       = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
+text       = _{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "/")+ }
 
 global = {
     (attribute ~ NEWLINE+)* ~ linkage ~ KW_GLOBL ~ MUTABLE? ~ name ~ ":" ~ complex_type ~ ("=" ~ block)?
@@ -62,13 +62,14 @@ module_name = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 symbol_name = @{ ('a'..'z' | 'A'..'Z' | '0'..'9' | "$" | "*" | "_" | "<" | ">" | "{" | "}" | "[" | "]" | "/")+ }
 
 global_attribute = {
-    "[" ~ "!" ~ attribute_path ~ ("(" ~ attribute_content ~ ")")? ~ "]"
+    "[" ~ "!" ~ attribute_path ~ (("(" ~ attribute_content ~ ")") | ("=" ~ attribute_item))? ~ "]"
 }
 
-attribute_content = { (!")" ~ ANY)* }
+attribute_item    =  { (!(")" | "]" | ",") ~ ANY)* }
+attribute_content = _{ attribute_item ~ ("," ~ attribute_item)* }
 
 attribute = _{
-    "[" ~ attribute_path ~ ("(" ~ attribute_content ~ ")")? ~ "]"
+    "[" ~ attribute_path ~ (("(" ~ attribute_content ~ ")") | ("=" ~ attribute_item))? ~ "]"
 }
 
 attribute_path = @{ text ~ ("::" ~ text)* }

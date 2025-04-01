@@ -60,10 +60,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     writeln!(out, "%hephaestus {}", version_to_asm_ver(module.version))?;
     writeln!(out, "# assembled version 0x{:04x}", module.version)?;
     writeln!(out)?;
-    writeln!(out, "[!target({})]", module.target)?;
+    writeln!(out, "[!heph::target({})]", module.target)?;
 
     if module.flags.contains(ModuleFlags::SUPPORTS_WIT_COMPONENTS) {
-        writeln!(out, "[!use_wit_components]")?;
+        writeln!(out, "[!heph::use_wit_components]")?;
+    }
+
+    if module.flags.contains(ModuleFlags::PARTIAL) {
+        writeln!(out, "[!heph::partial]")?;
     }
 
     for custom_feature in &module.metadata {

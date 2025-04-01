@@ -1,0 +1,11 @@
+%hephaestus 0.1.0
+
+expect funct @perform_test2() -> void
+
+internal funct @perform_test1() -> void {
+    return
+}
+
+export nodocument noaccessible funct @main($argc: u_ptr, $argv: u_ptr) -> void {
+    call @perform_test2
+}

@@ -1,3 +1,4 @@
+use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
 use ordered_hash_map::OrderedHashMap;
 use pest::{error::LineColLocation, iterators::Pair, Parser};
@@ -8,8 +9,9 @@ use thiserror::Error;
 
 use crate::instruction::Instruction;
 use crate::{
-    ComplexType, Const, ImportedModule, Item, LinkageFlags, Module, Source, StructField,
-    StructFieldLayout, StructLayout, Type,
+    ComplexType, Const, ImportedModule, Item, LinkageFlags, MetadataContentKind,
+    MetadataDeclaration, Module, ModuleFlags, Source, StructField, StructFieldLayout, StructLayout,
+    Target, Type,
 };
 
 mod grammar {
@@ -87,14 +89,16 @@ impl AsmError {
 
 #[derive(Default, Debug)]
 pub struct ParsedHeph {
+    target: Target,
+    module_flags: ModuleFlags,
     globals: OrderedHashMap<String, Global>,
 }
 
 impl ParsedHeph {
     pub fn finish(self) -> Module {
         let mut module = Module::default();
-        // TODO Module flags
-        // TODO imported modules
+        module.flags = self.module_flags;
+        module.target = self.target;
 
         for (name, global) in self.globals {
             match global {
@@ -1042,7 +1046,109 @@ pub fn parse_text_asm(text: &str) -> Result<ParsedHeph, AsmError> {
                     ));
                 }
             }
-            Rule::global_attribute => { /* TODO */ }
+            Rule::global_attribute => {
+                let mut pairs = pair.into_inner();
+                let path = pairs.next().unwrap();
+                debug_assert_eq!(path.as_rule(), Rule::attribute_path);
+
+                match path.as_str() {
+                    "target" | "heph::target" => {
+                        let target_name = pairs.next().ok_or_else(|| {
+                            AsmError::new_for(
+                                &path,
+                                "this attribute requires a target to be specified",
+                            )
+                        })?;
+
+                        let target = Target::from_str(target_name.as_str()).map_err(|e| {
+                            AsmError::new_for(&target_name, &format!("invalid target name: {e}"))
+                        })?;
+
+                        parsed.target = target;
+                    }
+
+                    "metadata" | "heph::metadata" => {
+                        let name = pairs
+                            .next()
+                            .ok_or_else(|| AsmError::new_for(&path, "name not specified"))?;
+                        let ty = pairs
+                            .next()
+                            .ok_or_else(|| AsmError::new_for(&path, "type not specified"))?;
+                        let content = pairs
+                            .next()
+                            .ok_or_else(|| AsmError::new_for(&path, "content not specified"))?;
+
+                        let kind = match ty.as_str() {
+                            "string" => MetadataContentKind::String,
+                            "target" => MetadataContentKind::Target,
+                            "bytes" => MetadataContentKind::Bytes,
+                            #[cfg(feature = "cbor-features")]
+                            "cbor" => MetadataContentKind::CBOR,
+                            "dwarf" => continue,
+                            other => todo!(),
+                        };
+
+                        let meta = MetadataDeclaration {
+                            name: name.as_str().into(),
+                            kind,
+                            content: match kind {
+                                MetadataContentKind::String => {
+                                    Bytes::copy_from_slice(content.as_str().as_bytes())
+                                }
+                                MetadataContentKind::Bytes => {
+                                    Bytes::from(hex::decode(content.as_str()).unwrap())
+                                }
+                                #[cfg(feature = "cbor-features")]
+                                MetadataContentKind::CBOR => {
+                                    let mut contents = vec![content.as_str()];
+
+                                    for pair in pairs {
+                                        contents.push(pair.as_str());
+                                    }
+
+                                    let content = contents.into_iter().join(",");
+
+                                    use rustc_serialize::Encodable;
+
+                                    let mut encoder = cbor::Encoder::from_memory();
+                                    match &content[..] {
+                                        "<nothing>" => {
+                                            cbor::Cbor::Null.encode(&mut encoder).unwrap();
+                                        }
+
+                                        other => {
+                                            rustc_serialize::json::Json::from_str(&other)
+                                                .unwrap()
+                                                .encode(&mut encoder)
+                                                .unwrap();
+                                        }
+                                    }
+
+                                    encoder.into_bytes().into()
+                                }
+                                MetadataContentKind::Target => {
+                                    let mut bytes = BytesMut::new();
+                                    bytes.put_u16(
+                                        Target::from_str(content.as_str()).unwrap().into_u16(),
+                                    );
+                                    bytes.freeze()
+                                }
+                                MetadataContentKind::DWARF => unreachable!(),
+                            },
+                        };
+                    }
+
+                    "use_wit_components" | "heph::use_wit_components" => {
+                        parsed.module_flags |= ModuleFlags::SUPPORTS_WIT_COMPONENTS;
+                    }
+
+                    "partial" | "heph::partial" => {
+                        parsed.module_flags |= ModuleFlags::PARTIAL;
+                    }
+
+                    _ => {}
+                }
+            }
             Rule::import_module => {
                 let pair = pair.into_inner().next().unwrap();
 
